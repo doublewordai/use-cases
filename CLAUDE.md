@@ -104,8 +104,28 @@ Results are available as they complete (don't need to wait for full batch).
 
 ### Available Models
 
-- `Qwen/Qwen3-VL-30B-A3B-Instruct-FP8` - Mid-size, GPT-4.1-mini tier
-- `Qwen/Qwen3-VL-235B-A22B-Instruct-FP8` - Flagship, GPT-4/Claude Opus tier
+All projects must support these models with consistent aliases:
+
+| Alias | Full Name | Tier |
+|-------|-----------|------|
+| `30b` | `Qwen/Qwen3-VL-30B-A3B-Instruct-FP8` | Mid-size, GPT-4.1-mini tier |
+| `235b` | `Qwen/Qwen3-VL-235B-A22B-Instruct-FP8` | Flagship, GPT-4/Claude Opus tier |
+| `gpt5-nano` | `gpt-5-nano` | OpenAI budget tier |
+| `gpt5-mini` | `gpt-5-mini` | OpenAI mid-tier |
+| `gpt5.2` | `gpt-5.2` | OpenAI flagship |
+
+Define this in your CLI:
+
+```python
+MODELS = {
+    "30b": "Qwen/Qwen3-VL-30B-A3B-Instruct-FP8",
+    "235b": "Qwen/Qwen3-VL-235B-A22B-Instruct-FP8",
+    "gpt5-nano": "gpt-5-nano",
+    "gpt5-mini": "gpt-5-mini",
+    "gpt5.2": "gpt-5.2",
+}
+DEFAULT_MODEL = "30b"
+```
 
 ## Code Conventions
 
@@ -114,6 +134,7 @@ Results are available as they complete (don't need to wait for full batch).
 ```
 use-case-name/
 ├── INSTRUCTIONS.md
+├── pyproject.toml      # Project config (see below)
 ├── src/
 │   ├── __init__.py
 │   ├── cli.py          # Click CLI entrypoint
@@ -124,20 +145,69 @@ use-case-name/
 └── report.md           # Final report
 ```
 
+### Project Setup (pyproject.toml)
+
+All projects must use this standard configuration:
+
+```toml
+[project]
+name = "use-case-name"
+version = "0.1.0"
+description = "Brief description"
+requires-python = ">=3.11"
+dependencies = [
+    "click>=8.1.0",
+    "openai>=1.0.0",
+    "requests>=2.31.0",
+    "tqdm>=4.66.0",
+]
+
+[project.scripts]
+use-case-name = "src.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+```
+
+Key requirements:
+- Python `>=3.11`
+- Entry point via `[project.scripts]` matching the folder name
+- hatchling build system
+
 ### CLI Pattern
 
-Use Click. Provide sensible defaults. Example:
+Use Click with model aliases. Example:
 
 ```python
 import click
 
-@click.command()
+MODELS = {
+    "30b": "Qwen/Qwen3-VL-30B-A3B-Instruct-FP8",
+    "235b": "Qwen/Qwen3-VL-235B-A22B-Instruct-FP8",
+    "gpt5-nano": "gpt-5-nano",
+    "gpt5-mini": "gpt-5-mini",
+    "gpt5.2": "gpt-5.2",
+}
+DEFAULT_MODEL = "30b"
+
+@click.group()
+def main():
+    """One-line description of what this does."""
+    pass
+
+@main.command()
 @click.option("--input", "-i", required=True, help="Input file or directory")
 @click.option("--output", "-o", default="results/", help="Output directory")
-@click.option("--model", default="Qwen/Qwen3-VL-30B-A3B-Instruct-FP8")
+@click.option("--model", "-m", default=DEFAULT_MODEL,
+              help="Model alias (30b, 235b, gpt5-nano, gpt5-mini, gpt5.2) or full name")
 @click.option("--dry-run", is_flag=True, help="Prepare batch but don't submit")
-def main(input, output, model, dry_run):
-    """One-line description of what this does."""
+def run(input, output, model, dry_run):
+    """Run the main workflow."""
+    model = MODELS.get(model, model)  # Resolve alias
     pass
 
 if __name__ == "__main__":
@@ -151,7 +221,7 @@ Use `uv` for dependency management:
 ```bash
 cd use-case-name
 uv init
-uv add openai click requests
+uv add openai click requests tqdm
 ```
 
 ### Async Batch Utilities
@@ -206,10 +276,15 @@ Include a cost comparison in every report.
 
 | Provider | Model | Input (per 1M) | Output (per 1M) | Batch Discount |
 |----------|-------|----------------|-----------------|----------------|
-| OpenAI | GPT-4o-mini | $0.15 | $0.60 | 50% |
-| OpenAI | GPT-4o | $2.50 | $10.00 | 50% |
-| Doubleword | Qwen3-30B | TBD | TBD | - |
-| Doubleword | Qwen3-235B | TBD | TBD | - |
+| OpenAI | GPT-5-nano | $0.10 | $0.40 | 50% |
+| OpenAI | GPT-5-mini | $0.15 | $0.60 | 50% |
+| OpenAI | GPT-5.2 | $1.75 | $14.00 | 50% |
+| Doubleword | Qwen3-30B (realtime) | $0.16 | $0.80 | - |
+| Doubleword | Qwen3-30B (24h batch) | $0.05 | $0.20 | - |
+| Doubleword | Qwen3-235B (realtime) | $0.80 | $2.40 | - |
+| Doubleword | Qwen3-235B (24h batch) | $0.20 | $0.60 | - |
+
+Source: [OpenAI](https://platform.openai.com/docs/pricing), [Doubleword](https://docs.doubleword.ai/batches/model-pricing)
 
 ### Tracking Usage
 
@@ -239,11 +314,12 @@ def count_tokens(results: dict) -> dict:
 | Input tokens | 2,450,000 |
 | Output tokens | 890,000 |
 
-| Provider | Estimated Cost |
-|----------|----------------|
-| OpenAI GPT-4o-mini (real-time) | $X.XX |
-| OpenAI GPT-4o-mini (batch) | $X.XX |
-| Doubleword Qwen3-30B | $X.XX |
+| Provider | Model | Mode | Estimated Cost |
+|----------|-------|------|----------------|
+| OpenAI | GPT-5-mini | Batch | $X.XX |
+| OpenAI | GPT-5.2 | Batch | $X.XX |
+| Doubleword | Qwen3-30B | 24h Batch | $X.XX |
+| Doubleword | Qwen3-235B | 24h Batch | $X.XX |
 ```
 
 ## Report Requirements

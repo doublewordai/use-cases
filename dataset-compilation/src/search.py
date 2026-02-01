@@ -1,0 +1,72 @@
+"""Serper search API wrapper."""
+
+import os
+import requests
+
+
+def get_api_key():
+    """Get Serper API key from environment."""
+    api_key = os.environ.get("SERPER_API_KEY")
+    if not api_key:
+        raise ValueError("SERPER_API_KEY environment variable not set")
+    return api_key
+
+
+def search(query: str, max_results: int = 10) -> dict:
+    """Run a Serper search.
+
+    Args:
+        query: Search query
+        max_results: Maximum number of results (default 10)
+
+    Returns:
+        Dict with 'results' list containing url, title, snippet
+    """
+    api_key = get_api_key()
+
+    response = requests.post(
+        "https://google.serper.dev/search",
+        headers={"X-API-KEY": api_key},
+        json={"q": query, "num": max_results},
+    )
+    response.raise_for_status()
+    data = response.json()
+
+    # Normalize to common format
+    results = []
+    for item in data.get("organic", []):
+        results.append({
+            "url": item.get("link"),
+            "title": item.get("title"),
+            "content": item.get("snippet"),  # Raw snippet, no LLM processing
+        })
+
+    return {"results": results}
+
+
+def search_batch(queries: list[str], max_results: int = 10) -> dict[str, dict]:
+    """Run multiple searches.
+
+    Args:
+        queries: List of search queries
+        max_results: Max results per query
+
+    Returns:
+        Dict mapping query -> search results
+    """
+    results = {}
+    for query in queries:
+        try:
+            results[query] = search(query, max_results=max_results)
+        except Exception as e:
+            results[query] = {"error": str(e), "results": []}
+    return results
+
+
+def extract_urls(search_results: dict) -> list[str]:
+    """Extract unique URLs from search results."""
+    urls = set()
+    for result in search_results.get("results", []):
+        if url := result.get("url"):
+            urls.add(url)
+    return list(urls)

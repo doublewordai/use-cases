@@ -46,10 +46,47 @@ Is there a clear cost comparison showing batch advantage?
 ```
 use-case-name/
 ├── INSTRUCTIONS.md    # Brief describing the use case
+├── pyproject.toml     # Project config (standardized)
 ├── src/               # Implementation code
+│   ├── __init__.py
 │   ├── cli.py         # CLI entrypoint
+│   ├── batch.py       # Batch API utilities
 │   └── ...
 ├── data/              # Sample data or scripts to fetch it
 ├── demo/              # Live demo (stretch goal)
 └── report.md          # Results report
 ```
+
+## Project Alignment
+
+All use cases must follow these conventions for consistency:
+
+### Required Configuration
+
+| Setting | Value |
+|---------|-------|
+| Python version | `>=3.11` |
+| Build system | hatchling |
+| Entry point | `[project.scripts]` matching folder name |
+
+### Required Models
+
+All projects comparing models must include these with consistent aliases:
+
+| Alias | Model |
+|-------|-------|
+| `30b` | `Qwen/Qwen3-VL-30B-A3B-Instruct-FP8` |
+| `235b` | `Qwen/Qwen3-VL-235B-A22B-Instruct-FP8` |
+| `gpt5-nano` | `gpt-5-nano` |
+| `gpt5-mini` | `gpt-5-mini` |
+| `gpt5.2` | `gpt-5.2` |
+
+### CLI Options
+
+Standard options across all projects:
+- `--model`, `-m`: Model alias or full name (default: `30b`)
+- `--input`, `-i`: Input file or directory
+- `--output`, `-o`: Output directory (default: `results/`)
+- `--dry-run`: Prepare but don't submit
+
+See `CLAUDE.md` for full implementation details.

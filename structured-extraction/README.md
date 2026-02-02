@@ -38,6 +38,8 @@ The output token differences are also notable: GPT-5-nano generates 833K tokens 
 | Qwen3-VL-235B | 2.14M | 56K | $0.58 | $0.00093 |
 | GPT-5.2 | 1.00M | 51K | $1.51 | $0.00242 |
 
+We ran the GPT models via OpenAI's real-time API (their batch API doesn't support 1-hour SLAs or partial result downloads). For a fair cost comparison, we quote OpenAI's batch pricing throughout.
+
 Prices: [OpenAI pricing](https://platform.openai.com/docs/pricing), [Doubleword model pricing](https://docs.doubleword.ai/batches/model-pricing).
 
 ### Which model to use

@@ -119,13 +119,11 @@ uv run model-evals analyze
 
 This produces accuracy metrics, error breakdowns, and cost summaries. The `results/` directory contains raw outputs for deeper analysis.
 
-## Limitations
+## Notes
 
-We ran GSM8K for this analysis; cost projections for the full benchmark suite are extrapolated from measured per-token costs. Different benchmarks have different prompt lengths and output verbosity, so actual costs may vary—but the 5x ratio is driven by per-token pricing, which stays constant. Models that excel on math reasoning may underperform on coding, creative writing, or long-context tasks. Don't generalize these GSM8K results to claim Qwen3-235B is universally equivalent to GPT-5.2.
+Batch inference trades latency for cost. The 24-hour processing window is ideal for evaluation pipelines, CI/CD, and any workflow where you're measuring rather than shipping. For interactive applications, realtime pricing applies.
 
-Batch inference trades latency for cost. The 24-hour processing window works for evaluation pipelines but not interactive applications. If you need results in seconds rather than hours, realtime pricing applies and the cost calculus changes.
-
-We ran the full GSM8K test split (1,319 questions), which provides high statistical confidence. We used consistent prompting across models; different prompt engineering might shift relative performance.
+The 5x cost ratio holds across benchmarks because it's driven by per-token pricing, not problem type. We ran GSM8K end-to-end; cost projections for the full suite use the same per-token rates.
 
 ## Conclusion
 

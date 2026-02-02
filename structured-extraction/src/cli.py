@@ -49,7 +49,7 @@ def encode_image(image_path: str) -> str:
     return f"data:{media_type};base64,{data}"
 
 
-def build_message(record: dict) -> list[dict]:
+def build_message(record: dict, detail: str = "auto") -> list[dict]:
     """Build message content for a record (image or text)."""
     prompt = get_image_extraction_prompt()
 
@@ -59,7 +59,7 @@ def build_message(record: dict) -> list[dict]:
         return [
             {
                 "type": "image_url",
-                "image_url": {"url": image_url},
+                "image_url": {"url": image_url, "detail": detail},
             },
             {
                 "type": "text",
@@ -234,7 +234,9 @@ def status(output_dir: str, wait: bool):
 @click.option("--model", "-m", default="gpt-5-mini", help="Model to use")
 @click.option("--concurrency", "-c", default=20, help="Number of concurrent requests")
 @click.option("--limit", "-l", type=int, help="Limit number of receipts to process")
-def realtime(input_path: str, output_dir: str, model: str, concurrency: int, limit: int):
+@click.option("--detail", "-d", default="auto", type=click.Choice(["auto", "low", "high"]),
+              help="Image detail level for vision models")
+def realtime(input_path: str, output_dir: str, model: str, concurrency: int, limit: int, detail: str):
     """Run extraction via real-time API with async concurrency."""
     import asyncio
     from .batch import run_realtime_extraction
@@ -256,6 +258,7 @@ def realtime(input_path: str, output_dir: str, model: str, concurrency: int, lim
     click.echo(f"Loaded {len(receipts)} receipts")
     click.echo(f"Model: {model}")
     click.echo(f"Concurrency: {concurrency}")
+    click.echo(f"Image detail: {detail}")
 
     # Build requests
     click.echo("Encoding images...")
@@ -263,7 +266,7 @@ def realtime(input_path: str, output_dir: str, model: str, concurrency: int, lim
     for receipt in tqdm(receipts, desc="Building messages"):
         receipt_id = receipt.get("id", str(len(requests_data)))
         try:
-            content = build_message(receipt)
+            content = build_message(receipt, detail=detail)
             requests_data.append({
                 "custom_id": f"{receipt_id}__run_0",
                 "body": {
@@ -291,7 +294,8 @@ def realtime(input_path: str, output_dir: str, model: str, concurrency: int, lim
 
     # Save results in same format as batch results
     model_short = model.replace("-", "").replace(".", "")
-    results_file = output_dir / f"results_{model_short}_n1.jsonl"
+    detail_suffix = f"_{detail}" if detail != "auto" else ""
+    results_file = output_dir / f"results_{model_short}{detail_suffix}_n1.jsonl"
     with open(results_file, "w") as f:
         for r in results:
             f.write(json.dumps(r) + "\n")

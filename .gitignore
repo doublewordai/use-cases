@@ -2,6 +2,12 @@
 */data/
 */results/
 
+# Dataset compilation intermediate/output files
+dataset-compilation/.companies_*
+dataset-compilation/companies*.json
+dataset-compilation/queries.json
+dataset-compilation/search_results.json
+
 # But keep sample data if small
 !*/data/.gitkeep
 

@@ -1,205 +1,201 @@
-# Dataset Compilation with LLM + Search
+# Dataset Compilation: 188 Companies for $1
 
-Compile exhaustive datasets of real-world entities using LLM + search. "Find all X that match Y" becomes a batch job.
+We built a comprehensive dataset of datacenter networking hardware companies using LLM-powered search and filtering. The pipeline recursively expands a topic description into diverse search queries, extracts structured data with batch inference, then validates each candidate with a second LLM pass. The final dataset contains 188 unique companies with 100% recall against the Gartner Magic Quadrant.
 
-## The Thesis
+To run this yourself, sign up at [app.doubleword.ai](https://app.doubleword.ai) and generate an API key.
 
-Manual dataset compilation takes days and misses the long tail. With LLM + search:
-- **Systematically explore** a search space with diverse queries
-- **Extract structured data** from unstructured search results
-- **Validate candidates** with a second LLM pass using fresh web search
-- **Find entities** that manual research and commercial databases miss
-- **Cost: $0.47** vs $500+ for analyst time or database subscriptions
+## Why This Works
 
-## Key Results
+Suppose you're doing competitive analysis for a networking hardware company, or you're an investor trying to map the datacenter infrastructure landscape, or you're identifying acquisition targets in a fragmented market. You need a comprehensive list of companies in the space, not just the obvious names that show up on the first page of Google.
 
-We compiled a dataset of **130 datacenter networking hardware companies** using LLM-generated search queries, Serper search API, batch extraction, and LLM-based filtering. Starting from 561 raw candidates, validation filtered out cloud providers, software vendors, and data center operators—leaving verified hardware vendors.
+The traditional options are expensive. You can pay a junior analyst to spend a few days searching and compiling a spreadsheet, which typically costs $500-800 and produces maybe 50 companies before they run out of search variations to try. Or you can subscribe to a commercial database like Crunchbase or PitchBook, which costs thousands per year and tends to be strong on VC-backed startups but weak on established players, international companies, and the long tail of smaller vendors.
 
-| Metric | Value |
-|--------|-------|
-| Companies validated | 130 |
-| Gartner MQ recall | 11/11 (100%) |
-| Noise reduction | 48% filtered out |
-| Total cost | ~$0.47 |
+The approach here uses LLMs for both query generation and filtering. We start with a topic description and recursively expand it into diverse search queries: the LLM takes "datacenter networking hardware companies" and generates sub-queries that approach it from different angles, and each of those expands again until we have 100+ specific queries covering geographic regions, product categories, business models, and recent events. Each query surfaces candidates the others miss.
 
-## Quick Start
+Raw extraction produces a lot of noise. Our initial pass found over 1,700 company mentions, but many of them were cloud providers, software vendors, and data center operators that mention networking hardware in their marketing without actually manufacturing it. Equinix, CyrusOne, and Azure all showed up. So we run a second LLM pass: for each candidate, we do a fresh web search and ask the model to classify whether the company actually makes networking hardware or is something else entirely. This filtering step removed 62 false positives while preserving every company from the Gartner Magic Quadrant.
+
+## Results
+
+We compiled a dataset of datacenter networking hardware vendors using this pipeline:
+
+| Stage | Count |
+|-------|-------|
+| Search queries generated | 125 |
+| Unique URLs searched | 714 |
+| Company mentions extracted | 1,762 |
+| After LLM deduplication | 285 |
+| After validation filtering | 223 |
+| **Unique companies (final)** | **188** |
+
+The filtering removed 22% of candidates, mostly data center operators (Equinix, CyrusOne), cloud providers (Azure), and software/services companies that showed up because their marketing mentions networking hardware. We run deduplication twice: once on the raw extraction results, and again on the filtered list. The second pass catches duplicates like "Hewlett Packard Enterprise" and "Hewlett-Packard Enterprise (HPE)" that both passed the filter independently.
+
+Here's what got cut and what survived:
+
+| Excluded (62 companies) | Kept (188 unique) |
+|--------------------------|-------------------|
+| DC operators: Equinix, CyrusOne, Aligned | Network equipment: Cisco, Juniper, Arista, Extreme |
+| Cloud providers: Azure | Hardware OEMs: Dell, HPE, Supermicro |
+| Software/services: DXC, Ensoft, SolveDirect | White-box vendors: Celestica, Edgecore, Accton |
+| | Silicon + hardware: Nvidia, Broadcom, Intel, Marvell |
+| | Enterprise: Alcatel-Lucent Enterprise, H3C, Nokia |
+
+### Validation Against Gartner
+
+To verify we weren't just finding well-known names, we checked recall against the [Gartner Magic Quadrant for Data Center Networking](https://www.gartner.com/doc/reprints?id=1-2FXLQWJB):
+
+| Quadrant | Companies | Found | Passed Filter |
+|----------|-----------|-------|---------------|
+| Leaders | Cisco, Juniper, Arista, Huawei | ✓ | ✓ |
+| Challengers | HPE, NVIDIA | ✓ | ✓ |
+| Visionaries | Dell, Nokia | ✓ | ✓ |
+| Niche Players | H3C, Extreme, Alcatel-Lucent Enterprise | ✓ | ✓ |
+
+We found all 11 vendors and the filtering step classified each one correctly, giving us 100% recall against the analyst benchmark.
+
+### Cost Breakdown
+
+| Step | API | Requests | Cost |
+|------|-----|----------|------|
+| Generate queries | Doubleword (real-time) | ~50 | $0.10 |
+| Initial search | [Serper](https://serper.dev/pricing) | 125 | $0.13 |
+| Extract companies | Doubleword (batch) | 1,216 | $0.40 |
+| LLM deduplication | Doubleword (batch) | 7 | $0.02 |
+| Validation search | Serper | 285 | $0.29 |
+| Validation classify | Doubleword (batch) | 285 | $0.09 |
+| Final deduplication | Doubleword (batch) | 3 | $0.01 |
+| **Total** | | | **~$1.05** |
+
+Doubleword batch pricing is 50% off standard rates ([pricing](https://doubleword.ai/pricing)). Serper charges $0.001 per search.
+
+For comparison:
+
+| Approach | Cost | Coverage |
+|----------|------|----------|
+| Junior analyst (2 days) | $500-800 | Finds the obvious names |
+| Crunchbase subscription | $5,000+/year | Good for VC-backed startups, weak on established players |
+| **LLM + search (this approach)** | **~$1** | 188 validated companies, 100% Gartner recall |
+
+The cost difference is roughly 500x. You can run hundreds of queries, validate every candidate, and iterate on the pipeline freely.
+
+## Replication
+
+The pipeline has five commands, each with explicit `--input` and `--output` flags so you can see exactly what flows where.
+
+### Setup
 
 ```bash
 cd dataset-compilation && uv sync
 
-export DOUBLEWORD_API_KEY="your-key"
-export SERPER_API_KEY="your-key"
-
-# 1. Generate diverse search queries
-uv run dataset-compilation generate-queries \
-  --topic "datacenter networking hardware companies" -n 15
-
-# 2. Run searches via Serper
-uv run dataset-compilation search -n 10
-
-# 3. Extract company data (batch LLM)
-uv run dataset-compilation extract -m 30b
-
-# 4. Wait for batch completion
-uv run dataset-compilation status
-
-# 5. Deduplicate and merge
-uv run dataset-compilation dedupe
-
-# 6. Filter to actual hardware vendors (web search + LLM)
-uv run dataset-compilation filter -m 30b
-
-# 7. Get filtered results
-uv run dataset-compilation filter-status
-
-# 8. Validate against known companies
-uv run dataset-compilation validate --known data/known_companies.txt
+export DOUBLEWORD_API_KEY="your-key"  # from app.doubleword.ai
+export SERPER_API_KEY="your-key"       # from serper.dev
 ```
 
-## Pipeline
-
-| Stage | Count |
-|-------|-------|
-| Search queries generated | 30 |
-| Unique URLs searched | 268 |
-| Company mentions extracted | 1,249 |
-| After dedupe | 252 |
-| **After filtering** | **130** |
-
-## Commands
-
-### `generate-queries` - Create diverse search queries
+### Step 1: Generate Search Queries
 
 ```bash
 uv run dataset-compilation generate-queries \
-  --topic "AI chip startups" \
-  --count 20 \
-  --model 30b
+  --topic "datacenter networking hardware companies" \
+  --max-depth 3 \
+  --output queries.json
 ```
 
-Uses LLM to generate queries covering major players, emerging companies, different geographies, product subcategories, and acquisitions.
+The command recursively expands the topic into diverse search queries. Starting from the topic description, the LLM generates 3-5 sub-queries that approach it from different angles (geography, product type, company type, etc.). Each sub-query expands again until the queries are specific enough to search. A depth-3 tree typically yields 100-150 queries covering:
 
-### `search` - Run queries through Serper
+- Geographic regions: "datacenter switch manufacturers in Taiwan", "Israeli networking hardware startups"
+- Product categories: "100GbE NIC vendors", "open source network operating systems"
+- Business models: "white-box switch ODMs", "networking hardware for hyperscale datacenters"
+- Temporal: "datacenter hardware acquisitions 2024", "emerging networking startups Series A"
+
+Query diversity matters more than volume. The recursive expansion ensures we probe different dimensions of the space rather than generating variations on the same query.
+
+### Step 2: Run Searches
 
 ```bash
-uv run dataset-compilation search --max-results 10
+uv run dataset-compilation search \
+  --input queries.json \
+  --output search_results.json \
+  --results-per-query 50
 ```
 
-### `extract` - Batch extract structured data
+This runs each query through Serper. We use 50 results per query to get broad coverage.
+
+### Step 3: Extract Companies
 
 ```bash
-uv run dataset-compilation extract --model 30b
+uv run dataset-compilation extract \
+  --input search_results.json \
+  --output companies_raw.json
 ```
 
-Extracts: company name, description, products, headquarters, website, confidence level.
+For each search result, we extract structured company data: name, description, products, headquarters, and website. Since we're processing 1,200+ pages, we use batch inference at 50% off real-time pricing. The command waits for the batch to complete by default.
 
-### `dedupe` - Merge and deduplicate
+### Step 4: First Dedupe Pass
 
 ```bash
-uv run dataset-compilation dedupe
+uv run dataset-compilation dedupe \
+  --input companies_raw.json \
+  --output companies.json
 ```
 
-### `filter` - Validate companies via web search + LLM
+Raw extraction produces multiple mentions of the same company with variant names ("Cisco" vs "Cisco Systems" vs "Cisco Systems, Inc."). The LLM clusters these duplicates semantically, which handles cases like "HPE" vs "Hewlett Packard Enterprise" that string normalization would miss.
+
+### Step 5: Filter and Validate
 
 ```bash
-uv run dataset-compilation filter --model 30b
+uv run dataset-compilation filter \
+  --input companies.json \
+  --output companies_filtered.json
 ```
 
-For each company:
-1. Runs a web search for "{company} networking hardware products"
-2. Uses batch LLM to classify based on search results
-3. Outputs filtered list of actual networking hardware vendors
+This step does the heavy lifting. Raw extraction found "Amazon" and "Microsoft" because their marketing pages mention networking hardware, even though they don't manufacture it. For each candidate, we run a fresh web search and ask the LLM to classify whether the company actually makes networking hardware or is something else entirely.
 
-Excludes cloud providers (AWS), chip companies, data center operators (Equinix), software-only SDN vendors, and resellers.
+The command also saves `companies_filtered_excluded.json` with the LLM's reasoning for each rejection.
 
-### `filter-status` - Get filter results
+### Step 6: Second Dedupe Pass
 
 ```bash
-uv run dataset-compilation filter-status
+uv run dataset-compilation dedupe \
+  --input companies_filtered.json \
+  --output companies_final.json
 ```
 
-Outputs:
-- `results/companies_filtered.json` - Validated hardware vendors
-- `results/filter_excluded.json` - Companies excluded with reasoning
-- `results/filter_uncertain.json` - Low-confidence classifications
+We run dedupe again on the smaller, cleaner filtered list. This catches remaining duplicates like "NVIDIA" and "Nvidia Corporation" that both passed the filter independently.
 
-## Filtering Results
+### Validate Against Ground Truth
 
-| Classification | Count | % |
-|----------------|-------|---|
-| Matches "datacenter networking hardware" | 130 | 52% |
-| Excluded (not hardware) | 122 | 48% |
+```bash
+uv run dataset-compilation validate \
+  --input companies_final.json \
+  --ground-truth ground_truth.json
+```
 
-**What was filtered out:**
+This checks recall against known companies (like the Gartner Magic Quadrant) and identifies any remaining duplicate clusters in the output.
 
-| Category | Examples |
-|----------|----------|
-| Cloud providers | Amazon, Microsoft, Google, CoreWeave |
-| Software-only | Citrix, Cloudflare, Metaswitch |
-| Data center operators | Digital Realty, Eurofiber |
+## Adapting to Other Domains
 
-**What was kept:**
+The pipeline works for any "find all X that match Y" task. Some examples:
 
-| Category | Examples |
-|----------|----------|
-| Network equipment | Cisco, Juniper, Arista, Extreme Networks |
-| Hardware OEMs | Dell, HPE, Supermicro |
-| White-box vendors | Celestica, Edgecore |
-| Silicon + hardware | Nvidia (SuperNICs), Broadcom, Intel (NICs) |
+| Topic | What the filter validates |
+|-------|---------------------------|
+| AI chip startups | Actually builds silicon, not just AI software |
+| European fintech companies | Offers financial products, not B2B SaaS |
+| Open source database companies | Has an open source project, not just "open" marketing |
+| Climate tech hardware | Manufactures physical products, not carbon credits |
 
-## Validation Against Gartner Magic Quadrant
-
-| Quadrant | Company | Found | Filtered |
-|----------|---------|-------|----------|
-| **Leaders** | Cisco, Juniper, Arista, Huawei | ✓ | ✓ |
-| **Challengers** | HPE, NVIDIA | ✓ | ✓ |
-| **Visionaries** | Dell, Nokia | ✓ | ✓ |
-| **Niche Players** | H3C, Extreme, Alcatel-Lucent | ✓ | ✓ |
-
-**Recall: 11/11 (100%)** - All Gartner MQ vendors survived filtering.
-
-## Cost Breakdown
-
-| Step | API | Requests | Cost |
-|------|-----|----------|------|
-| Generate queries | Doubleword (real-time) | 2 | $0.004 |
-| Search (initial) | Serper | 30 | $0.03 |
-| Extract companies | Doubleword (batch) | 300 | $0.10 |
-| Filter: search | Serper | 252 | $0.25 |
-| Filter: classify | Doubleword (batch) | 252 | $0.08 |
-| **Total** | | | **~$0.47** |
-
-### Alternative Approaches
-
-| Method | Estimated Cost | Coverage |
-|--------|----------------|----------|
-| Manual research (analyst) | $500-2000 | Variable |
-| Commercial database (Crunchbase) | $5000+/year | Good for startups |
-| **This approach** | **~$0.47** | 130 validated companies |
-
-## Example Topics
-
-| Topic | Expected Companies |
-|-------|-------------------|
-| Datacenter networking hardware | Cisco, Arista, Juniper + white-box vendors |
-| AI chip startups | Groq, Cerebras, SambaNova + emerging players |
-| European fintech companies | Revolut, Klarna, N26 + long tail |
-| Open source database companies | MongoDB, Cockroach, PlanetScale + niche |
+The important thing is defining a clear filter criterion that separates true positives from noise. The LLM handles this classification well when you give it fresh web search context about each candidate.
 
 ## Limitations
 
-1. **Filtering accuracy**: LLM classification isn't perfect—some false positives remain (e.g., Equinix).
-2. **Deduplication**: Simple name normalization misses variants (HPE vs Hewlett Packard Enterprise).
-3. **Search depth**: 30 queries × 10 results limits coverage; more queries would find more companies.
-4. **Prompt sensitivity**: Results depend on LLM's interpretation of category definitions.
+**Filtering accuracy.** The LLM classifier isn't perfect. We manually reviewed a sample and found a ~5% error rate, mostly false positives (companies incorrectly kept). For high-stakes applications, you might want a human review step for low-confidence classifications.
+
+**Deduplication.** LLM-based deduplication catches most variants ("HPE" = "Hewlett Packard Enterprise"), but edge cases slip through. Running the dedupe step twice helps, but for critical applications you should spot-check the output for remaining duplicates.
+
+**Search depth.** We used 125 queries × 50 results. More aggressive expansion (deeper trees, more results per query) would find more companies, though with diminishing returns as coverage saturates.
+
+**Temporal coverage.** The pipeline captures what's currently indexed. Recently founded companies or those with minimal web presence will be missed.
 
 ## Conclusion
 
-LLM + search enables dataset compilation with built-in validation:
+The pipeline runs LLMs at two stages. First, during query expansion and extraction: we turn a topic description into 125 diverse search queries, then extract structured company data from 1,200+ search results. Second, during filtering: we run a fresh web search for each candidate and ask the LLM to classify whether it actually matches the topic. This second pass cut 62 false positives (data center operators, cloud providers, companies with insufficient web presence) while keeping all 11 vendors from the Gartner Magic Quadrant.
 
-1. **$0.47 for 130 validated companies** vs. hundreds/thousands for manual research
-2. **100% recall** on Gartner MQ vendors (11/11) after filtering
-3. **48% noise reduction** - filtering removed cloud providers, software vendors, operators
-4. **Transparent reasoning** - each exclusion includes LLM's explanation
-
-The filtering step is the key insight: raw extraction produces noisy results (561 "companies" including Amazon, Microsoft, Cloudflare). A second LLM pass with fresh web search context validates each candidate, cutting the list in half while preserving all true positives.
+Batch inference makes this practical. Processing 1,500+ LLM requests at real-time API rates would cost several dollars and take hours. Batch pricing brings the total under $1, and results come back in minutes. At that price point, you can run the pipeline monthly to catch new entrants, or adapt it to adjacent markets.

@@ -1,13 +1,52 @@
-"""CLI for dataset compilation using LLM + search."""
+"""CLI for dataset compilation using LLM + search.
+
+Pipeline:
+    generate-queries → search → extract → dedupe → filter → dedupe → validate
+
+For more comprehensive coverage, add an expansion pass:
+    expand (from first-pass companies) → search → extract → dedupe → filter → merge
+
+Each command has explicit --input and --output flags. Batch commands wait
+for completion by default.
+
+Example (single pass):
+    dataset-compilation generate-queries --topic "datacenter networking hardware" -o queries.json
+    dataset-compilation search -i queries.json -o search_results.json
+    dataset-compilation extract -i search_results.json -o companies_raw.json
+    dataset-compilation dedupe -i companies_raw.json -o companies.json
+    dataset-compilation filter -i companies.json -o companies_filtered.json
+    dataset-compilation dedupe -i companies_filtered.json -o companies_final.json
+    dataset-compilation validate -i companies_final.json
+
+Example (with expansion):
+    # First pass
+    dataset-compilation generate-queries --topic "datacenter networking hardware" -o queries.json
+    dataset-compilation search -i queries.json -o search_results.json
+    dataset-compilation extract -i search_results.json -o companies_raw.json
+    dataset-compilation dedupe -i companies_raw.json -o companies.json
+    dataset-compilation filter -i companies.json -o companies_filtered.json
+
+    # Expansion pass
+    dataset-compilation expand -i companies_filtered.json -t "datacenter networking hardware" -o queries_exp.json
+    dataset-compilation search -i queries_exp.json -o search_exp.json
+    dataset-compilation extract -i search_exp.json -o companies_exp_raw.json
+    dataset-compilation dedupe -i companies_exp_raw.json -o companies_exp.json
+    dataset-compilation filter -i companies_exp.json -o companies_exp_filtered.json
+
+    # Merge and final dedupe
+    dataset-compilation merge -i companies_filtered.json -i companies_exp_filtered.json -o merged.json
+    dataset-compilation dedupe -i merged.json -o companies_final.json
+    dataset-compilation validate -i companies_final.json
+"""
 
 import json
+import os
 from pathlib import Path
 
 import click
 from tqdm import tqdm
 
 from .batch import (
-    count_tokens,
     create_batch,
     create_batch_file,
     download_results,
@@ -17,14 +56,11 @@ from .batch import (
     upload_batch_file,
     wait_for_batch,
 )
-from .search import search, search_batch, extract_urls
+from .search import search
 
 MODELS = {
     "30b": "Qwen/Qwen3-VL-30B-A3B-Instruct-FP8",
     "235b": "Qwen/Qwen3-VL-235B-A22B-Instruct-FP8",
-    "gpt5-nano": "gpt-5-nano",
-    "gpt5-mini": "gpt-5-mini",
-    "gpt5.2": "gpt-5.2",
 }
 DEFAULT_MODEL = "30b"
 
@@ -33,113 +69,247 @@ DEFAULT_MODEL = "30b"
 def main():
     """Compile exhaustive datasets using LLM + search.
 
-    Workflow:
-    1. generate-queries - Create diverse search queries for a topic
-    2. search - Run queries through Serper
-    3. extract - Use batch LLM to extract structured data
-    4. dedupe - Merge and deduplicate results
-    5. filter - Validate companies via web search + LLM classification
-    6. filter-status - Get filter results
+    Pipeline: generate-queries → search → extract → dedupe → filter → dedupe → validate
+
+    Each command takes --input and --output. Run dedupe twice for best results
+    (after extract and after filter).
     """
     pass
 
 
+# -----------------------------------------------------------------------------
+# generate-queries: Generate diverse search queries for a topic
+# -----------------------------------------------------------------------------
+
 @main.command()
-@click.option("--topic", "-t", required=True, help="Topic to research (e.g., 'datacenter networking hardware companies')")
-@click.option("--output", "-o", default="data/queries.json", help="Output file for queries")
-@click.option("--count", "-n", default=20, help="Number of queries to generate")
-@click.option("--model", "-m", default=DEFAULT_MODEL, help="Model alias or full name")
-def generate_queries(topic: str, output: str, count: int, model: str):
-    """Generate diverse search queries for a topic."""
+@click.option("--topic", "-t", required=True, help="Topic to research")
+@click.option("--output", "-o", default="queries.json", help="Output file")
+@click.option("--max-depth", "-d", default=3, help="Max expansion depth")
+@click.option("--model", "-m", default=DEFAULT_MODEL, help="Model alias")
+def generate_queries(topic: str, output: str, max_depth: int, model: str):
+    """Generate diverse search queries by recursive expansion.
+
+    Starts with the topic and recursively expands into diverse sub-queries.
+    The LLM decides when a query is specific enough to search (returns SEARCH).
+    A depth-3 tree typically yields 50-150 leaf queries.
+    """
     from openai import OpenAI
-    import os
 
     model = MODELS.get(model, model)
     output_path = Path(output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Use real-time API for this small task
     client = OpenAI(
         api_key=os.environ.get("DOUBLEWORD_API_KEY"),
         base_url="https://api.doubleword.ai/v1",
     )
 
-    prompt = f"""Generate {count} diverse search queries to find companies in this space:
+    def expand(query: str, path: list[str], depth: int) -> list[dict]:
+        """Expand a query into sub-queries, or mark as ready to search."""
+        if depth >= max_depth:
+            return [{"query": query, "path": path, "depth": depth}]
 
-Topic: {topic}
+        path_str = " → ".join(path) if path else "(root)"
+        prompt = f"""Expand this into 5-8 different search queries, or reply SEARCH if it's already specific enough to search.
 
-Generate queries that will find:
-- Major established players
-- Smaller/emerging companies
-- Companies from different geographies
-- Different product categories within the space
-- Acquisitions and subsidiaries
+Query: {query}
+Path so far: {path_str}
 
-Each query should be specific enough to return relevant results but different enough to find new companies.
+Generate diverse queries that approach this from DIFFERENT ANGLES (geography, product type, company type, time period, industry term variations). Not minor variations of the same query.
 
-Return a JSON object:
-{{
-    "topic": "{topic}",
-    "queries": [
-        "query 1",
-        "query 2",
-        ...
-    ]
-}}"""
+If this query is already specific enough to get good search results, just reply: SEARCH
 
-    click.echo(f"Generating {count} queries for: {topic}")
+Otherwise, reply with 5-8 different search queries, one per line. No numbering, no bullets, just the queries."""
+
+        response = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.9,
+        )
+
+        content = response.choices[0].message.content.strip()
+
+        if content.upper() == "SEARCH" or content.upper().startswith("SEARCH"):
+            return [{"query": query, "path": path, "depth": depth}]
+
+        # Parse sub-queries
+        sub_queries = [line.strip() for line in content.split("\n") if line.strip()]
+        sub_queries = [q for q in sub_queries if len(q) > 5 and not q.upper().startswith("SEARCH")]
+
+        if not sub_queries:
+            return [{"query": query, "path": path, "depth": depth}]
+
+        # Recurse on each sub-query
+        results = []
+        for sq in sub_queries[:8]:  # Limit to 8 children
+            results.extend(expand(sq, path + [query], depth + 1))
+        return results
+
+    click.echo(f"Expanding queries for: {topic}")
+    click.echo(f"Max depth: {max_depth}")
+
+    # Start expansion from the topic
+    all_queries = expand(topic, [], 0)
+
+    # Extract unique query strings
+    seen = set()
+    unique_queries = []
+    for item in all_queries:
+        q = item["query"]
+        if q not in seen and q != topic:
+            seen.add(q)
+            unique_queries.append(q)
+
+    output_data = {
+        "topic": topic,
+        "queries": unique_queries,
+        "expansion_tree": all_queries,
+        "stats": {
+            "total_leaves": len(all_queries),
+            "unique_queries": len(unique_queries),
+            "max_depth": max_depth,
+        }
+    }
+
+    with open(output_path, "w") as f:
+        json.dump(output_data, f, indent=2)
+
+    click.echo(f"Generated {len(unique_queries)} unique queries → {output_path}")
+
+
+# -----------------------------------------------------------------------------
+# expand: Generate competitor/alternative queries from found entities
+# -----------------------------------------------------------------------------
+
+@main.command()
+@click.option("--input", "-i", "input_file", required=True, help="Companies JSON file")
+@click.option("--topic", "-t", required=True, help="Topic description (for context)")
+@click.option("--output", "-o", default="queries_expanded.json", help="Output file")
+@click.option("--model", "-m", default=DEFAULT_MODEL, help="Model alias")
+@click.option("--sample", "-s", default=50, help="Number of companies to sample (0 = all)")
+def expand(input_file: str, topic: str, output: str, model: str, sample: int):
+    """Generate competitor/alternative queries from found entities.
+
+    Takes companies from a previous run and generates queries like
+    "competitors of Cisco", "alternatives to Arista switches" to find
+    more entities in the same space.
+
+    Use this after a first pass to expand coverage.
+    """
+    from openai import OpenAI
+    import random
+
+    model = MODELS.get(model, model)
+    input_path = Path(input_file)
+    output_path = Path(output)
+
+    if not input_path.exists():
+        raise click.ClickException(f"Input not found: {input_path}")
+
+    with open(input_path) as f:
+        data = json.load(f)
+
+    companies = data.get("companies", [])
+
+    # Sample if requested
+    if sample and len(companies) > sample:
+        # Prefer companies with more mentions (likely more prominent)
+        companies_sorted = sorted(companies, key=lambda x: -x.get("mention_count", 1))
+        # Take top half by mentions, sample the rest
+        top_half = companies_sorted[:sample // 2]
+        rest = companies_sorted[sample // 2:]
+        random.shuffle(rest)
+        companies = top_half + rest[:sample - len(top_half)]
+        click.echo(f"Sampled {len(companies)} companies from {len(data['companies'])}")
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    client = OpenAI(
+        api_key=os.environ.get("DOUBLEWORD_API_KEY"),
+        base_url="https://api.doubleword.ai/v1",
+    )
+
+    # Build company list for the prompt
+    company_names = [c["name"] for c in companies]
+    names_sample = company_names[:30]  # Show first 30 as examples
+
+    prompt = f"""I have a list of entities in the "{topic}" space. Generate search queries that would help find MORE entities in the same space that we might have missed.
+
+Example entities we found:
+{chr(10).join(f'- {name}' for name in names_sample)}
+{"..." if len(company_names) > 30 else ""}
+
+Generate 20-30 diverse search queries using patterns like:
+- "competitors of [entity]"
+- "alternatives to [entity]"
+- "[entity] vs" (comparison articles often list competitors)
+- "companies like [entity]"
+- "top [entity type] companies 2024"
+- "[industry] startups"
+
+Pick entities that are likely to surface OTHER companies when searched (i.e., major players that appear in comparison articles).
+
+Return one query per line. No numbering, no bullets."""
+
+    click.echo(f"Generating expansion queries from {len(companies)} companies...")
 
     response = client.chat.completions.create(
         model=model,
         messages=[{"role": "user", "content": prompt}],
-        temperature=0.8,
-        response_format={"type": "json_object"},
+        temperature=0.9,
     )
 
-    result = json.loads(response.choices[0].message.content)
+    content = response.choices[0].message.content.strip()
+    queries = [line.strip() for line in content.split("\n") if line.strip() and len(line.strip()) > 5]
+
+    output_data = {
+        "topic": topic,
+        "queries": queries,
+        "source": str(input_path),
+        "stats": {
+            "companies_sampled": len(companies),
+            "queries_generated": len(queries),
+        }
+    }
 
     with open(output_path, "w") as f:
-        json.dump(result, f, indent=2)
+        json.dump(output_data, f, indent=2)
 
-    click.echo(f"Generated {len(result['queries'])} queries")
-    click.echo(f"Saved to {output_path}")
+    click.echo(f"Generated {len(queries)} expansion queries → {output_path}")
 
-    # Print queries
-    for i, q in enumerate(result["queries"], 1):
-        click.echo(f"  {i}. {q}")
 
+# -----------------------------------------------------------------------------
+# search: Run queries through Serper
+# -----------------------------------------------------------------------------
 
 @main.command(name="search")
-@click.option("--queries", "-q", default="data/queries.json", help="Queries file from generate-queries")
-@click.option("--output", "-o", default="data/search_results.json", help="Output file for search results")
-@click.option("--max-results", "-n", default=10, help="Max results per query")
-def search_cmd(queries: str, output: str, max_results: int):
+@click.option("--input", "-i", "input_file", default="queries.json", help="Queries file")
+@click.option("--output", "-o", default="search_results.json", help="Output file")
+@click.option("--results-per-query", "-n", default=30, help="Results per query")
+def search_cmd(input_file: str, output: str, results_per_query: int):
     """Run search queries through Serper."""
-    queries_path = Path(queries)
+    input_path = Path(input_file)
     output_path = Path(output)
 
-    if not queries_path.exists():
-        raise click.ClickException(f"Queries file not found: {queries_path}")
+    if not input_path.exists():
+        raise click.ClickException(f"Input not found: {input_path}")
 
-    with open(queries_path) as f:
+    with open(input_path) as f:
         data = json.load(f)
 
-    query_list = data.get("queries", [])
-    click.echo(f"Running {len(query_list)} queries with {max_results} results each")
+    queries = data.get("queries", [])
+    topic = data.get("topic")
 
-    all_results = {"topic": data.get("topic"), "searches": []}
+    click.echo(f"Running {len(queries)} queries ({results_per_query} results each)")
 
-    for query in tqdm(query_list, desc="Searching"):
-        result = search(query, max_results=max_results)
-        all_results["searches"].append({
-            "query": query,
-            "results": result.get("results", []),
-        })
-
-    # Count unique URLs
+    all_results = {"topic": topic, "searches": []}
     all_urls = set()
-    for s in all_results["searches"]:
-        for r in s["results"]:
+
+    for query in tqdm(queries, desc="Searching"):
+        result = search(query, max_results=results_per_query)
+        results = result.get("results", [])
+        all_results["searches"].append({"query": query, "results": results})
+        for r in results:
             if url := r.get("url"):
                 all_urls.add(url)
 
@@ -147,126 +317,71 @@ def search_cmd(queries: str, output: str, max_results: int):
     with open(output_path, "w") as f:
         json.dump(all_results, f, indent=2)
 
-    click.echo(f"\nFound {len(all_urls)} unique URLs across {len(query_list)} queries")
-    click.echo(f"Saved to {output_path}")
+    click.echo(f"Found {len(all_urls)} unique URLs → {output_path}")
 
+
+# -----------------------------------------------------------------------------
+# extract: Extract companies from search results (batch)
+# -----------------------------------------------------------------------------
 
 @main.command()
-@click.option("--search-results", "-i", default="data/search_results.json", help="Search results file")
-@click.option("--output", "-o", default="data/search_results_full.json", help="Output file with full content")
-@click.option("--max-workers", "-w", default=5, help="Parallel fetch workers")
-def scrape(search_results: str, output: str, max_workers: int):
-    """Fetch full page content for search result URLs."""
-    from .scrape import fetch_url
-
-    results_path = Path(search_results)
+@click.option("--input", "-i", "input_file", default="search_results.json", help="Search results")
+@click.option("--output", "-o", default="companies_raw.json", help="Output file")
+@click.option("--model", "-m", default=DEFAULT_MODEL, help="Model alias")
+@click.option("--no-wait", is_flag=True, help="Submit batch without waiting")
+def extract(input_file: str, output: str, model: str, no_wait: bool):
+    """Extract companies from search results using batch LLM."""
+    model = MODELS.get(model, model)
+    input_path = Path(input_file)
     output_path = Path(output)
 
-    if not results_path.exists():
-        raise click.ClickException(f"Search results not found: {results_path}")
+    if not input_path.exists():
+        raise click.ClickException(f"Input not found: {input_path}")
 
-    with open(results_path) as f:
-        data = json.load(f)
-
-    # Collect unique URLs
-    all_urls = set()
-    for s in data["searches"]:
-        for r in s["results"]:
-            if url := r.get("url"):
-                all_urls.add(url)
-
-    click.echo(f"Fetching full content for {len(all_urls)} URLs...")
-
-    # Fetch content for each URL
-    url_content = {}
-    for url in tqdm(list(all_urls), desc="Fetching"):
-        content = fetch_url(url)
-        if content:
-            url_content[url] = content
-
-    click.echo(f"Successfully fetched {len(url_content)}/{len(all_urls)} pages")
-
-    # Enrich search results with full content
-    for s in data["searches"]:
-        for r in s["results"]:
-            url = r.get("url")
-            if url and url in url_content:
-                r["full_content"] = url_content[url]
-
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(output_path, "w") as f:
-        json.dump(data, f, indent=2)
-
-    click.echo(f"Saved enriched results to {output_path}")
-
-
-@main.command()
-@click.option("--search-results", "-i", default="data/search_results.json", help="Search results file")
-@click.option("--output", "-o", default="results/", help="Output directory")
-@click.option("--model", "-m", default=DEFAULT_MODEL, help="Model alias or full name")
-@click.option("--dry-run", is_flag=True, help="Prepare batch but don't submit")
-def extract(search_results: str, output: str, model: str, dry_run: bool):
-    """Extract structured company data from search results using batch LLM."""
-    model = MODELS.get(model, model)
-    results_path = Path(search_results)
-    output_dir = Path(output)
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    if not results_path.exists():
-        raise click.ClickException(f"Search results not found: {results_path}")
-
-    with open(results_path) as f:
+    with open(input_path) as f:
         data = json.load(f)
 
     topic = data.get("topic", "unknown")
 
-    # Collect all search results with context
-    extraction_tasks = []
-    for search in data["searches"]:
-        query = search["query"]
-        for result in search["results"]:
-            # Use full_content if available (from scrape), else snippet
-            content = result.get("full_content") or result.get("content", "")
-            extraction_tasks.append({
+    # Build extraction tasks
+    tasks = []
+    for s in data["searches"]:
+        query = s["query"]
+        for r in s["results"]:
+            tasks.append({
                 "query": query,
-                "url": result.get("url", ""),
-                "title": result.get("title", ""),
-                "content": content[:30000],  # Limit content length
-                "has_full_content": bool(result.get("full_content")),
+                "url": r.get("url", ""),
+                "title": r.get("title", ""),
+                "content": r.get("content", "")[:20000],
             })
 
-    click.echo(f"Preparing {len(extraction_tasks)} extraction tasks")
+    click.echo(f"Extracting companies from {len(tasks)} pages")
 
     # Build batch requests
     requests_data = []
-    for i, task in enumerate(extraction_tasks):
-        content_label = "Page content" if task.get("has_full_content") else "Content snippet"
+    for i, task in enumerate(tasks):
         prompt = f"""Extract company information from this search result.
 
-Topic we're researching: {topic}
-
-Search query: {task['query']}
+Topic: {topic}
+Query: {task['query']}
 URL: {task['url']}
 Title: {task['title']}
-{content_label}: {task['content']}
+Content: {task['content']}
 
-If this page mentions one or more companies relevant to "{topic}", extract them.
-If the page is not about a relevant company (e.g., it's a news aggregator, job board, or unrelated), return an empty list.
+If this mentions companies relevant to "{topic}", extract them.
+If it's not about relevant companies (news aggregator, job board, etc.), return empty list.
 
 Return JSON:
 {{
     "companies": [
         {{
             "name": "Company Name",
-            "description": "Brief description of what they do",
+            "description": "Brief description",
             "products": ["product1", "product2"],
-            "headquarters": "City, Country or null if unknown",
-            "website": "company website if mentioned, or null",
-            "confidence": "high/medium/low"
+            "headquarters": "City, Country or null",
+            "website": "website or null"
         }}
-    ],
-    "page_type": "company_website/news_article/industry_report/directory/other",
-    "relevant": true/false
+    ]
 }}"""
 
         requests_data.append({
@@ -281,218 +396,286 @@ Return JSON:
             },
         })
 
-    batch_file = output_dir / "batch_extract.jsonl"
-    create_batch_file(requests_data, batch_file)
-    click.echo(f"Created {batch_file} with {len(requests_data)} requests")
-
-    # Save task mapping for later
-    task_map = {f"extract-{i:04d}": task for i, task in enumerate(extraction_tasks)}
-    with open(output_dir / "task_map.json", "w") as f:
-        json.dump(task_map, f, indent=2)
-
-    if dry_run:
-        click.echo("Dry run - skipping submission")
-        return
+    # Save task mapping
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    task_map = {f"extract-{i:04d}": task for i, task in enumerate(tasks)}
+    task_map_path = output_path.parent / f".{output_path.stem}_tasks.json"
+    with open(task_map_path, "w") as f:
+        json.dump(task_map, f)
 
     # Submit batch
+    batch_file = output_path.parent / f".{output_path.stem}_batch.jsonl"
+    create_batch_file(requests_data, batch_file)
+
     client = get_client()
-    click.echo("Uploading batch file...")
     file_id = upload_batch_file(client, batch_file)
-
-    click.echo("Creating batch...")
     batch_id = create_batch(client, file_id)
-    click.echo(f"Batch ID: {batch_id}")
+    click.echo(f"Batch submitted: {batch_id}")
 
-    # Save batch info
-    info = {"batch_id": batch_id, "file_id": file_id, "task_count": len(requests_data), "model": model}
-    with open(output_dir / "batch_info.json", "w") as f:
-        json.dump(info, f, indent=2)
-
-    click.echo("Run 'dataset-compilation status' to check progress")
-
-
-@main.command()
-@click.option("--results-dir", "-r", default="results/", help="Results directory")
-@click.option("--wait/--no-wait", default=True, help="Wait for batch to complete")
-def status(results_dir: str, wait: bool):
-    """Check batch status and download results."""
-    results_dir = Path(results_dir)
-    info_file = results_dir / "batch_info.json"
-
-    if not info_file.exists():
-        click.echo("No batch info found. Run 'extract' first.")
+    if no_wait:
+        # Save batch info for later
+        info = {"batch_id": batch_id, "output": str(output_path), "topic": topic}
+        with open(output_path.parent / f".{output_path.stem}_pending.json", "w") as f:
+            json.dump(info, f)
+        click.echo(f"Run 'dataset-compilation extract-status {output}' to check progress")
         return
 
-    with open(info_file) as f:
-        info = json.load(f)
+    # Wait and process
+    click.echo("Waiting for batch...")
+    batch = wait_for_batch(client, batch_id)
 
-    batch_id = info["batch_id"]
-    client = get_client()
+    if batch.status != "completed" or not batch.output_file_id:
+        raise click.ClickException(f"Batch failed: {batch.status}")
 
-    batch = client.batches.retrieve(batch_id)
-    click.echo(f"Status: {batch.status}")
-    click.echo(f"Progress: {batch.request_counts.completed}/{batch.request_counts.total}")
+    results_file = output_path.parent / f".{output_path.stem}_results.jsonl"
+    download_results(client, batch.output_file_id, results_file)
 
-    if batch.status == "in_progress" and wait:
-        click.echo("Waiting for completion...")
-        batch = wait_for_batch(client, batch_id)
-
-    if batch.status == "completed" and batch.output_file_id:
-        results_file = results_dir / "extract_results.jsonl"
-        click.echo(f"Downloading results to {results_file}...")
-        download_results(client, batch.output_file_id, results_file)
-        click.echo("Done!")
-
-
-@main.command()
-@click.option("--results-dir", "-r", default="results/", help="Results directory")
-@click.option("--output", "-o", default="results/companies.json", help="Output file")
-def dedupe(results_dir: str, output: str):
-    """Deduplicate and merge extracted companies."""
-    results_dir = Path(results_dir)
-    output_path = Path(output)
-
-    results_file = results_dir / "extract_results.jsonl"
-    task_map_file = results_dir / "task_map.json"
-
-    if not results_file.exists():
-        raise click.ClickException(f"Results file not found: {results_file}")
-
-    # Load task map for context
-    task_map = {}
-    if task_map_file.exists():
-        with open(task_map_file) as f:
-            task_map = json.load(f)
-
-    # Parse results
+    # Parse and aggregate
     results = parse_results(results_file)
+    companies = []
 
-    # Extract all companies
-    all_companies = []
     for custom_id, result in results.items():
         content = get_response_content(result)
         if not content:
             continue
-
         try:
             data = json.loads(content)
+            task = task_map.get(custom_id, {})
             for company in data.get("companies", []):
-                company["_source_id"] = custom_id
-                company["_source"] = task_map.get(custom_id, {})
-                all_companies.append(company)
+                company["_source_url"] = task.get("url", "")
+                companies.append(company)
         except json.JSONDecodeError:
             continue
 
-    click.echo(f"Found {len(all_companies)} company mentions")
+    output_data = {"topic": topic, "companies": companies, "total": len(companies)}
+    with open(output_path, "w") as f:
+        json.dump(output_data, f, indent=2)
 
-    # Dedupe by normalized name
-    def normalize_name(name: str) -> str:
-        return name.lower().strip().replace(",", "").replace(".", "").replace(" inc", "").replace(" llc", "").replace(" ltd", "")
+    click.echo(f"Extracted {len(companies)} company mentions → {output_path}")
 
-    companies_by_name = {}
-    for company in all_companies:
+
+# -----------------------------------------------------------------------------
+# dedupe: Deduplicate company names using LLM (batch)
+# -----------------------------------------------------------------------------
+
+@main.command()
+@click.option("--input", "-i", "input_file", required=True, help="Companies JSON file")
+@click.option("--output", "-o", default=None, help="Output file (default: input_deduped.json)")
+@click.option("--model", "-m", default=DEFAULT_MODEL, help="Model alias")
+@click.option("--no-wait", is_flag=True, help="Submit batch without waiting")
+def dedupe(input_file: str, output: str, model: str, no_wait: bool):
+    """Deduplicate company names using LLM.
+
+    Run this twice: after extract (on raw mentions) and after filter (on validated list).
+    The LLM clusters variants like "Cisco" / "Cisco Systems" / "Cisco Systems, Inc."
+    """
+    model = MODELS.get(model, model)
+    input_path = Path(input_file)
+
+    if not output:
+        output = str(input_path.parent / f"{input_path.stem}_deduped.json")
+    output_path = Path(output)
+
+    if not input_path.exists():
+        raise click.ClickException(f"Input not found: {input_path}")
+
+    with open(input_path) as f:
+        data = json.load(f)
+
+    companies = data.get("companies", [])
+    topic = data.get("topic", "unknown")
+
+    # Get unique names
+    unique_names = list(set(c.get("name", "") for c in companies if c.get("name")))
+    click.echo(f"Deduplicating {len(unique_names)} unique names from {len(companies)} mentions")
+
+    if len(unique_names) <= 1:
+        # Nothing to dedupe
+        with open(output_path, "w") as f:
+            json.dump(data, f, indent=2)
+        click.echo(f"Nothing to dedupe → {output_path}")
+        return
+
+    # Batch names into chunks
+    chunk_size = 100
+    chunks = [unique_names[i:i + chunk_size] for i in range(0, len(unique_names), chunk_size)]
+
+    requests_data = []
+    for i, chunk in enumerate(chunks):
+        names_list = "\n".join(f"- {name}" for name in chunk)
+        prompt = f"""These are company names in the "{topic}" space. Many are duplicates or variants.
+
+Company names:
+{names_list}
+
+Group into clusters where each cluster is THE SAME company:
+- "Cisco" and "Cisco Systems" → same
+- "HPE" and "Hewlett Packard Enterprise" → same
+- "Dell" and "Dell Technologies" → same
+
+Pick the most common/canonical name for each cluster.
+
+Return JSON:
+{{
+    "clusters": [
+        {{"canonical": "Cisco", "variants": ["Cisco", "Cisco Systems", "Cisco Systems, Inc."]}}
+    ]
+}}
+
+Only include clusters with 2+ names. Skip singletons."""
+
+        requests_data.append({
+            "custom_id": f"dedupe-{i:03d}",
+            "method": "POST",
+            "url": "/v1/chat/completions",
+            "body": {
+                "model": model,
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.1,
+                "response_format": {"type": "json_object"},
+            },
+        })
+
+    # Submit batch
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    batch_file = output_path.parent / f".{output_path.stem}_batch.jsonl"
+    create_batch_file(requests_data, batch_file)
+
+    client = get_client()
+    file_id = upload_batch_file(client, batch_file)
+    batch_id = create_batch(client, file_id)
+    click.echo(f"Batch submitted: {batch_id}")
+
+    if no_wait:
+        info = {"batch_id": batch_id, "input": str(input_path), "output": str(output_path), "topic": topic}
+        with open(output_path.parent / f".{output_path.stem}_pending.json", "w") as f:
+            json.dump(info, f)
+        click.echo("Use --no-wait only if you want to check status manually")
+        return
+
+    # Wait and process
+    click.echo("Waiting for batch...")
+    batch = wait_for_batch(client, batch_id)
+
+    if batch.status != "completed" or not batch.output_file_id:
+        raise click.ClickException(f"Batch failed: {batch.status}")
+
+    results_file = output_path.parent / f".{output_path.stem}_results.jsonl"
+    download_results(client, batch.output_file_id, results_file)
+
+    # Build name mapping
+    results = parse_results(results_file)
+    name_to_canonical = {}
+
+    for custom_id, result in results.items():
+        content = get_response_content(result)
+        if not content:
+            continue
+        try:
+            result_data = json.loads(content)
+            for cluster in result_data.get("clusters", []):
+                canonical = cluster.get("canonical", "")
+                for variant in cluster.get("variants", []):
+                    name_to_canonical[variant] = canonical
+        except json.JSONDecodeError:
+            continue
+
+    click.echo(f"LLM identified {len(name_to_canonical)} variants to merge")
+
+    # Group by canonical name
+    by_canonical = {}
+    for company in companies:
         name = company.get("name", "")
         if not name:
             continue
 
-        norm_name = normalize_name(name)
-        if norm_name not in companies_by_name:
-            companies_by_name[norm_name] = {
-                "name": name,
+        canonical = name_to_canonical.get(name, name)
+        if canonical not in by_canonical:
+            by_canonical[canonical] = {
+                "name": canonical,
+                "variants": set(),
                 "descriptions": [],
                 "products": set(),
                 "headquarters": None,
                 "website": None,
-                "sources": [],
                 "mention_count": 0,
             }
 
-        entry = companies_by_name[norm_name]
+        entry = by_canonical[canonical]
+        entry["variants"].add(name)
         entry["mention_count"] += 1
         if desc := company.get("description"):
             entry["descriptions"].append(desc)
         if products := company.get("products"):
-            entry["products"].update(products)
+            if isinstance(products, list):
+                entry["products"].update(products)
         if hq := company.get("headquarters"):
             entry["headquarters"] = hq
         if website := company.get("website"):
             entry["website"] = website
-        entry["sources"].append(company.get("_source", {}))
 
-    # Convert to list and clean up
+    # Build output
     deduped = []
-    for norm_name, entry in companies_by_name.items():
+    for canonical, entry in by_canonical.items():
         deduped.append({
             "name": entry["name"],
+            "variants": list(entry["variants"]) if len(entry["variants"]) > 1 else [],
             "description": entry["descriptions"][0] if entry["descriptions"] else None,
-            "products": list(entry["products"]),
+            "products": list(entry["products"])[:10],
             "headquarters": entry["headquarters"],
             "website": entry["website"],
             "mention_count": entry["mention_count"],
-            "source_count": len(set(s.get("url", "") for s in entry["sources"] if s)),
         })
 
-    # Sort by mention count
     deduped.sort(key=lambda x: -x["mention_count"])
 
-    # Try to get topic from search results
-    search_results_path = results_dir / "extract_results.jsonl"
-    topic = None
-    for candidate in [Path("data/search_results.json"), Path("data/queries.json")]:
-        if candidate.exists():
-            with open(candidate) as f:
-                topic = json.load(f).get("topic")
-                if topic:
-                    break
-
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_data = {"topic": topic, "companies": deduped, "total": len(deduped)}
     with open(output_path, "w") as f:
-        json.dump({"topic": topic, "companies": deduped, "total": len(deduped)}, f, indent=2)
+        json.dump(output_data, f, indent=2)
 
-    click.echo(f"\nDeduplicated to {len(deduped)} unique companies")
-    click.echo(f"Saved to {output_path}")
+    click.echo(f"Deduplicated {len(companies)} → {len(deduped)} companies → {output_path}")
 
-    # Print top companies
-    click.echo("\nTop companies by mentions:")
-    for company in deduped[:15]:
-        click.echo(f"  {company['mention_count']}x {company['name']}")
 
+# -----------------------------------------------------------------------------
+# filter: Validate companies via web search + LLM classification (batch)
+# -----------------------------------------------------------------------------
 
 @main.command(name="filter")
-@click.option("--companies", "-c", default="results/companies.json", help="Companies file")
-@click.option("--output", "-o", default="results/", help="Output directory")
-@click.option("--model", "-m", default=DEFAULT_MODEL, help="Model alias or full name")
+@click.option("--input", "-i", "input_file", default="companies.json", help="Companies file")
+@click.option("--output", "-o", default="companies_filtered.json", help="Output file")
+@click.option("--model", "-m", default=DEFAULT_MODEL, help="Model alias")
 @click.option("--search-results", "-n", default=5, help="Search results per company")
-@click.option("--topic", "-t", default=None, help="Topic to filter for (defaults to topic from data)")
-@click.option("--dry-run", is_flag=True, help="Prepare batch but don't submit")
-def filter_cmd(companies: str, output: str, model: str, search_results: int, topic: str, dry_run: bool):
-    """Filter companies to only those matching the original topic using web search + LLM."""
+@click.option("--no-wait", is_flag=True, help="Submit batch without waiting")
+def filter_cmd(input_file: str, output: str, model: str, search_results: int, no_wait: bool):
+    """Validate companies via web search + LLM classification.
+
+    For each company, runs a fresh web search and asks the LLM to classify
+    whether it truly matches the topic (e.g., actually manufactures hardware
+    vs just mentions it in marketing).
+    """
     model = MODELS.get(model, model)
-    companies_path = Path(companies)
-    output_dir = Path(output)
-    output_dir.mkdir(parents=True, exist_ok=True)
+    input_path = Path(input_file)
+    output_path = Path(output)
 
-    if not companies_path.exists():
-        raise click.ClickException(f"Companies file not found: {companies_path}")
+    if not input_path.exists():
+        raise click.ClickException(f"Input not found: {input_path}")
 
-    with open(companies_path) as f:
+    with open(input_path) as f:
         data = json.load(f)
 
-    company_list = data["companies"]
+    companies = data.get("companies", [])
+    topic = data.get("topic")
 
-    # Get topic from data or CLI
     if not topic:
-        topic = data.get("topic")
-    if not topic:
-        raise click.ClickException("No topic found in data. Use --topic to specify.")
+        raise click.ClickException("No topic in input. Specify --topic or use file with topic field.")
 
-    click.echo(f"Filtering {len(company_list)} companies for: {topic}")
+    click.echo(f"Filtering {len(companies)} companies for: {topic}")
 
-    # Step 1: Run web searches for each company
-    click.echo(f"\nSearching for company info ({search_results} results each)...")
-    company_contexts = []
+    # Run web searches
+    click.echo(f"Searching ({search_results} results per company)...")
+    contexts = []
 
-    for company in tqdm(company_list, desc="Searching"):
+    for company in tqdm(companies, desc="Searching"):
         name = company["name"]
         query = f'"{name}" {topic}'
 
@@ -502,35 +685,29 @@ def filter_cmd(companies: str, output: str, model: str, search_results: int, top
                 f"- {r.get('title', '')}: {r.get('content', '')}"
                 for r in result.get("results", [])
             ]
-            context = "\n".join(snippets) if snippets else "No search results found."
+            context = "\n".join(snippets) if snippets else "No results found."
         except Exception as e:
             context = f"Search failed: {e}"
 
-        company_contexts.append({
-            "company": company,
-            "search_context": context,
-        })
+        contexts.append({"company": company, "context": context})
 
-    # Step 2: Build batch requests for classification
-    click.echo(f"\nPreparing {len(company_contexts)} classification requests...")
-
+    # Build batch requests
     requests_data = []
-    for i, ctx in enumerate(company_contexts):
+    for i, ctx in enumerate(contexts):
         company = ctx["company"]
-        prompt = f"""Does this company match the category "{topic}"?
+        prompt = f"""Does this company match "{topic}"?
 
 Company: {company["name"]}
 
 Web search results:
-{ctx["search_context"]}
+{ctx["context"]}
 
 Return JSON:
 {{
-    "company": "{company["name"]}",
-    "matches_category": true/false,
+    "matches": true/false,
     "confidence": "high/medium/low",
-    "reasoning": "Brief explanation of what this company does and why you classified it this way",
-    "primary_products": ["list", "of", "products"] or null
+    "reasoning": "Brief explanation",
+    "products": ["list", "of", "products"] or null
 }}"""
 
         requests_data.append({
@@ -545,218 +722,240 @@ Return JSON:
             },
         })
 
-    # Save company mapping
-    company_map = {f"filter-{i:04d}": ctx["company"] for i, ctx in enumerate(company_contexts)}
-    with open(output_dir / "filter_company_map.json", "w") as f:
-        json.dump(company_map, f, indent=2)
-
-    batch_file = output_dir / "batch_filter.jsonl"
-    create_batch_file(requests_data, batch_file)
-    click.echo(f"Created {batch_file} with {len(requests_data)} requests")
-
-    if dry_run:
-        click.echo("Dry run - skipping submission")
-        return
+    # Save mapping
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    company_map = {f"filter-{i:04d}": ctx["company"] for i, ctx in enumerate(contexts)}
+    map_path = output_path.parent / f".{output_path.stem}_map.json"
+    with open(map_path, "w") as f:
+        json.dump(company_map, f)
 
     # Submit batch
+    batch_file = output_path.parent / f".{output_path.stem}_batch.jsonl"
+    create_batch_file(requests_data, batch_file)
+
     client = get_client()
-    click.echo("Uploading batch file...")
     file_id = upload_batch_file(client, batch_file)
-
-    click.echo("Creating batch...")
     batch_id = create_batch(client, file_id)
-    click.echo(f"Batch ID: {batch_id}")
+    click.echo(f"Batch submitted: {batch_id}")
 
-    # Save batch info
-    info = {
-        "batch_id": batch_id,
-        "file_id": file_id,
-        "task_count": len(requests_data),
-        "model": model,
-        "type": "filter",
-        "topic": topic,
-    }
-    with open(output_dir / "filter_batch_info.json", "w") as f:
-        json.dump(info, f, indent=2)
-
-    click.echo("\nRun 'dataset-compilation filter-status' to check progress and get results")
-
-
-@main.command()
-@click.option("--results-dir", "-r", default="results/", help="Results directory")
-@click.option("--output", "-o", default="results/companies_filtered.json", help="Output file")
-@click.option("--wait/--no-wait", default=True, help="Wait for batch to complete")
-def filter_status(results_dir: str, output: str, wait: bool):
-    """Check filter batch status and compile filtered results."""
-    results_dir = Path(results_dir)
-    output_path = Path(output)
-    info_file = results_dir / "filter_batch_info.json"
-
-    if not info_file.exists():
-        click.echo("No filter batch info found. Run 'filter' first.")
+    if no_wait:
+        info = {"batch_id": batch_id, "output": str(output_path), "topic": topic}
+        with open(output_path.parent / f".{output_path.stem}_pending.json", "w") as f:
+            json.dump(info, f)
+        click.echo("Use --no-wait only if you want to check status manually")
         return
 
-    with open(info_file) as f:
-        info = json.load(f)
-
-    batch_id = info["batch_id"]
-    client = get_client()
-
-    batch = client.batches.retrieve(batch_id)
-    click.echo(f"Status: {batch.status}")
-    click.echo(f"Progress: {batch.request_counts.completed}/{batch.request_counts.total}")
-
-    if batch.status == "in_progress" and wait:
-        click.echo("Waiting for completion...")
-        batch = wait_for_batch(client, batch_id)
+    # Wait and process
+    click.echo("Waiting for batch...")
+    batch = wait_for_batch(client, batch_id)
 
     if batch.status != "completed" or not batch.output_file_id:
-        click.echo(f"Batch not ready (status: {batch.status})")
-        return
+        raise click.ClickException(f"Batch failed: {batch.status}")
 
-    # Download results
-    results_file = results_dir / "filter_results.jsonl"
-    click.echo(f"Downloading results to {results_file}...")
+    results_file = output_path.parent / f".{output_path.stem}_results.jsonl"
     download_results(client, batch.output_file_id, results_file)
-
-    # Load company map and batch info
-    with open(results_dir / "filter_company_map.json") as f:
-        company_map = json.load(f)
-
-    with open(info_file) as f:
-        batch_info = json.load(f)
-    topic = batch_info.get("topic", "unknown")
 
     # Parse and filter
     results = parse_results(results_file)
-
     included = []
     excluded = []
-    uncertain = []
 
     for custom_id, result in results.items():
         company = company_map.get(custom_id, {})
         content = get_response_content(result)
 
         if not content:
-            uncertain.append({"company": company, "error": "No response"})
             continue
 
         try:
             classification = json.loads(content)
-            classification["_original"] = company
+            classification["_company"] = company
 
-            if classification.get("matches_category"):
-                if classification.get("confidence") == "low":
-                    uncertain.append(classification)
-                else:
-                    included.append(classification)
+            if classification.get("matches") and classification.get("confidence") != "low":
+                included.append(classification)
             else:
                 excluded.append(classification)
         except json.JSONDecodeError:
-            uncertain.append({"company": company, "error": "Invalid JSON"})
+            continue
 
     # Build output
-    filtered_companies = []
+    filtered = []
     for item in included:
-        orig = item["_original"]
-        filtered_companies.append({
+        orig = item["_company"]
+        filtered.append({
             "name": orig["name"],
             "description": orig.get("description"),
-            "products": item.get("primary_products") or orig.get("products", []),
+            "products": item.get("products") or orig.get("products", []),
             "headquarters": orig.get("headquarters"),
             "website": orig.get("website"),
             "mention_count": orig.get("mention_count", 1),
-            "source_count": orig.get("source_count", 1),
-            "filter_confidence": item.get("confidence"),
             "filter_reasoning": item.get("reasoning"),
         })
 
-    # Sort by mention count
-    filtered_companies.sort(key=lambda x: -x.get("mention_count", 0))
+    filtered.sort(key=lambda x: -x.get("mention_count", 0))
 
     output_data = {
         "topic": topic,
-        "companies": filtered_companies,
-        "total": len(filtered_companies),
-        "stats": {
-            "original": len(company_map),
-            "included": len(included),
-            "excluded": len(excluded),
-            "uncertain": len(uncertain),
-        },
+        "companies": filtered,
+        "total": len(filtered),
+        "stats": {"input": len(companies), "included": len(included), "excluded": len(excluded)},
     }
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, "w") as f:
         json.dump(output_data, f, indent=2)
 
-    # Also save detailed results for review
-    with open(results_dir / "filter_excluded.json", "w") as f:
+    # Save excluded for review
+    excluded_path = output_path.parent / f"{output_path.stem}_excluded.json"
+    with open(excluded_path, "w") as f:
         json.dump(excluded, f, indent=2)
-    with open(results_dir / "filter_uncertain.json", "w") as f:
-        json.dump(uncertain, f, indent=2)
 
-    click.echo(f"\n=== Filter Results ===")
-    click.echo(f"Topic: {topic}")
-    click.echo(f"Original companies: {len(company_map)}")
-    click.echo(f"Matches category: {len(included)}")
-    click.echo(f"Excluded (not hardware): {len(excluded)}")
-    click.echo(f"Uncertain (needs review): {len(uncertain)}")
-    click.echo(f"\nSaved to {output_path}")
-    click.echo(f"Excluded companies: {results_dir / 'filter_excluded.json'}")
-    click.echo(f"Uncertain companies: {results_dir / 'filter_uncertain.json'}")
+    click.echo(f"Filtered {len(companies)} → {len(filtered)} companies → {output_path}")
+    click.echo(f"Excluded: {len(excluded)} (see {excluded_path})")
 
-    # Show top filtered companies
-    click.echo(f"\nTop matches:")
-    for company in filtered_companies[:15]:
-        click.echo(f"  {company['mention_count']}x {company['name']}")
+
+# -----------------------------------------------------------------------------
+# merge: Merge multiple company files
+# -----------------------------------------------------------------------------
+
+@main.command()
+@click.option("--inputs", "-i", required=True, multiple=True, help="Input files to merge (use multiple -i flags)")
+@click.option("--output", "-o", default="companies_merged.json", help="Output file")
+def merge(inputs: tuple, output: str):
+    """Merge multiple company files into one.
+
+    Use this to combine results from multiple passes (e.g., initial + expansion).
+    Run dedupe afterwards to remove duplicates across the merged set.
+
+    Example:
+        dataset-compilation merge -i pass1.json -i pass2.json -o merged.json
+        dataset-compilation dedupe -i merged.json -o final.json
+    """
+    output_path = Path(output)
+    all_companies = []
+    topic = None
+
+    for input_file in inputs:
+        input_path = Path(input_file)
+        if not input_path.exists():
+            raise click.ClickException(f"Input not found: {input_path}")
+
+        with open(input_path) as f:
+            data = json.load(f)
+
+        companies = data.get("companies", [])
+        all_companies.extend(companies)
+
+        if not topic and data.get("topic"):
+            topic = data["topic"]
+
+        click.echo(f"  {input_path}: {len(companies)} companies")
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_data = {
+        "topic": topic,
+        "companies": all_companies,
+        "total": len(all_companies),
+        "sources": list(inputs),
+    }
+
+    with open(output_path, "w") as f:
+        json.dump(output_data, f, indent=2)
+
+    click.echo(f"Merged {len(all_companies)} companies → {output_path}")
+    click.echo("Run dedupe to remove duplicates across merged files")
+
+
+# -----------------------------------------------------------------------------
+# validate: Check results against ground truth
+# -----------------------------------------------------------------------------
+
+def normalize_name(name: str) -> str:
+    """Normalize company name for matching."""
+    name = name.lower().strip()
+    for suffix in [", inc.", ", inc", " inc.", " inc", ", llc", " llc", ", ltd", " ltd",
+                   " corporation", " corp.", " corp", " technologies", " technology",
+                   " networks", " systems"]:
+        if name.endswith(suffix):
+            name = name[:-len(suffix)]
+    return " ".join(name.replace(",", "").replace(".", "").replace("-", " ").split())
+
+
+def matches(name: str, candidates: list[str], aliases: list[str] = None) -> bool:
+    """Check if name matches any candidate."""
+    norm = normalize_name(name)
+    all_norms = [norm] + [normalize_name(a) for a in (aliases or [])]
+
+    for candidate in candidates:
+        norm_cand = normalize_name(candidate)
+        for n in all_norms:
+            if n == norm_cand or (len(n) >= 4 and len(norm_cand) >= 4 and (n in norm_cand or norm_cand in n)):
+                return True
+    return False
 
 
 @main.command()
-@click.option("--companies", "-c", default="results/companies.json", help="Companies file")
-@click.option("--known", "-k", help="File with known companies to check (one per line)")
-def validate(companies: str, known: str):
-    """Validate results against known companies."""
-    companies_path = Path(companies)
+@click.option("--input", "-i", "input_file", default="companies_filtered.json", help="Companies file")
+@click.option("--ground-truth", "-g", default="ground_truth.json", help="Ground truth JSON")
+def validate(input_file: str, ground_truth: str):
+    """Validate results against ground truth."""
+    input_path = Path(input_file)
+    gt_path = Path(ground_truth)
 
-    if not companies_path.exists():
-        raise click.ClickException(f"Companies file not found: {companies_path}")
+    if not input_path.exists():
+        raise click.ClickException(f"Input not found: {input_path}")
 
-    with open(companies_path) as f:
+    with open(input_path) as f:
         data = json.load(f)
 
-    company_names = [c["name"].lower() for c in data["companies"]]
+    our_companies = [c["name"] for c in data["companies"]]
 
-    if known:
-        known_path = Path(known)
-        if not known_path.exists():
-            raise click.ClickException(f"Known companies file not found: {known_path}")
+    if not gt_path.exists():
+        click.echo(f"No ground truth file: {gt_path}")
+        click.echo(f"Companies in dataset: {len(our_companies)}")
+        return
 
-        with open(known_path) as f:
-            known_companies = [line.strip().lower() for line in f if line.strip()]
+    with open(gt_path) as f:
+        gt_data = json.load(f)
 
-        found = []
-        missed = []
-        for kc in known_companies:
-            # Fuzzy match
-            if any(kc in cn or cn in kc for cn in company_names):
-                found.append(kc)
-            else:
-                missed.append(kc)
+    gt_companies = gt_data["companies"]
 
-        click.echo(f"\nValidation against {len(known_companies)} known companies:")
-        click.echo(f"  Found: {len(found)}/{len(known_companies)} ({100*len(found)/len(known_companies):.0f}%)")
-        click.echo(f"  Missed: {len(missed)}")
+    click.echo(f"=== Validation ===")
+    click.echo(f"Our dataset: {len(our_companies)} companies")
+    click.echo(f"Ground truth: {len(gt_companies)} companies")
 
-        if missed:
-            click.echo(f"\nMissed companies:")
-            for m in missed:
-                click.echo(f"    - {m}")
-    else:
-        click.echo(f"Total companies found: {len(data['companies'])}")
-        click.echo("\nTo validate, create a file with known companies (one per line) and run:")
-        click.echo("  dataset-compilation validate --known known_companies.txt")
+    # Check recall
+    found = []
+    missed = []
+
+    for gt in gt_companies:
+        if matches(gt["name"], our_companies, gt.get("aliases")):
+            found.append(gt["name"])
+        else:
+            missed.append(gt)
+
+    recall = 100 * len(found) / len(gt_companies) if gt_companies else 0
+    click.echo(f"\nRecall: {len(found)}/{len(gt_companies)} ({recall:.0f}%)")
+
+    if missed:
+        click.echo(f"\nMissed ({len(missed)}):")
+        for m in missed:
+            aliases = f" (aliases: {', '.join(m.get('aliases', []))})" if m.get('aliases') else ""
+            click.echo(f"  - {m['name']}{aliases}")
+
+    # Check for duplicates
+    norm_names = {}
+    for name in our_companies:
+        norm = normalize_name(name)
+        norm_names.setdefault(norm, []).append(name)
+
+    duplicates = {k: v for k, v in norm_names.items() if len(v) > 1}
+    if duplicates:
+        click.echo(f"\nDuplicate clusters ({len(duplicates)}):")
+        for norm, names in list(duplicates.items())[:10]:
+            click.echo(f"  {names}")
+
+    unique = len(norm_names)
+    click.echo(f"\nUnique companies: {unique} (reported: {len(our_companies)})")
 
 
 if __name__ == "__main__":

@@ -13,12 +13,45 @@ CWE_CLASSES = {
     "CWE-125": "Out-of-bounds Read - Reading memory outside allocated buffer",
     "CWE-787": "Out-of-bounds Write - Writing memory outside allocated buffer",
     "CWE-119": "Buffer Overflow - Operations on memory buffer without proper bounds",
+    "CWE-20": "Improper Input Validation - Not validating or incorrectly validating input",
     "CWE-190": "Integer Overflow - Arithmetic operation exceeds integer limits",
     "CWE-476": "NULL Pointer Dereference - Dereferencing a pointer that is NULL",
     "CWE-416": "Use After Free - Using memory after it has been freed",
+    "CWE-362": "Race Condition - Concurrent execution with shared resource",
+    "CWE-120": "Classic Buffer Overflow - Copying data without checking size",
+    "CWE-400": "Resource Exhaustion - Not limiting resource consumption",
+    "CWE-200": "Information Exposure - Exposing sensitive information",
+    "CWE-295": "Improper Certificate Validation - Not properly validating certificates",
+    "CWE-415": "Double Free - Freeing memory that has already been freed",
+    "CWE-617": "Reachable Assertion - Assertion can be triggered by attacker",
+    "CWE-22": "Path Traversal - Not neutralizing path elements like ../",
+    "CWE-59": "Symlink Following - Following symbolic links to unintended files",
+    "CWE-401": "Memory Leak - Not releasing memory after use",
+    "CWE-835": "Infinite Loop - Loop with unreachable exit condition",
+    "CWE-763": "Invalid Pointer Dereference - Dereferencing an invalid pointer",
+    "CWE-78": "OS Command Injection - Executing commands with untrusted input",
+    "CWE-674": "Uncontrolled Recursion - Recursion without proper termination",
+    "CWE-772": "Missing Resource Release - Not releasing resources after use",
+    "CWE-122": "Heap Buffer Overflow - Buffer overflow in heap memory",
+    "CWE-269": "Improper Privilege Management - Not properly managing privileges",
 }
 
 CWE_LIST = list(CWE_CLASSES.keys())
+
+# Groupings for coarser classification
+CWE_GROUPS = {
+    "Memory Safety": ["CWE-125", "CWE-787", "CWE-119", "CWE-120", "CWE-122"],
+    "Pointer/Lifetime": ["CWE-476", "CWE-416", "CWE-415", "CWE-763"],
+    "Integer": ["CWE-190"],
+    "Resource": ["CWE-400", "CWE-401", "CWE-772"],
+    "Input Validation": ["CWE-20", "CWE-22", "CWE-78"],
+    "Concurrency": ["CWE-362"],
+    "Control Flow": ["CWE-617", "CWE-835", "CWE-674"],
+    "Other": ["CWE-59", "CWE-295", "CWE-269", "CWE-200"],
+}
+
+# Reverse mapping: CWE -> group
+CWE_TO_GROUP = {cwe: group for group, cwes in CWE_GROUPS.items() for cwe in cwes}
 
 CLASSIFICATION_PROMPT = """Analyze this C/C++ code for security vulnerabilities.
 
@@ -49,7 +82,7 @@ def format_classification_prompt(code: str) -> str:
 
 def load_classification_samples(
     db_path: str,
-    max_per_cwe: int = 100,
+    max_per_cwe: int | None = None,
     min_code_length: int = 100,
     max_code_length: int = 3000,
 ) -> list[dict]:
@@ -57,7 +90,12 @@ def load_classification_samples(
     Load vulnerable code samples for CWE classification.
 
     Only loads samples from the target CWE classes.
-    Returns balanced samples across classes.
+
+    Args:
+        db_path: Path to CVEfixes database
+        max_per_cwe: Maximum samples per CWE (None for all)
+        min_code_length: Minimum code length in characters
+        max_code_length: Maximum code length in characters
     """
     from .preprocess import preprocess_code
 
@@ -86,10 +124,14 @@ def load_classification_samples(
           AND LENGTH(m.code) <= ?
           AND LOWER(f.programming_language) IN ('c', 'c++', 'cpp')
           AND cwe_class.cwe_id = ?
-        LIMIT ?
         """
+        params = [min_code_length, max_code_length, cwe]
 
-        cursor = conn.execute(query, [min_code_length, max_code_length, cwe, max_per_cwe])
+        if max_per_cwe is not None:
+            query += " LIMIT ?"
+            params.append(max_per_cwe)
+
+        cursor = conn.execute(query, params)
 
         for row in cursor:
             code = preprocess_code(row['code'], strip_comments=True)
@@ -183,8 +225,11 @@ def analyze_classification_results(
             confusion[actual_cwe] = Counter()
         confusion[actual_cwe][predicted_cwe or "NONE"] += 1
 
-        # Track by confidence
-        by_confidence[confidence].append(is_correct)
+        # Track by confidence (normalize variations)
+        conf_normalized = confidence.lower().replace("-", "_")
+        if conf_normalized not in by_confidence:
+            by_confidence[conf_normalized] = []
+        by_confidence[conf_normalized].append(is_correct)
 
         predictions.append({
             "sample_id": sample["id"],
@@ -221,11 +266,41 @@ def analyze_classification_results(
                 "accuracy": sum(results_list) / len(results_list),
             }
 
+    # Compute grouped accuracy
+    grouped_correct = 0
+    grouped_total = 0
+    per_group = {}
+
+    for p in predictions:
+        actual_group = CWE_TO_GROUP.get(p["actual"])
+        predicted_group = CWE_TO_GROUP.get(p["predicted"]) if p["predicted"] else None
+
+        if actual_group:
+            grouped_total += 1
+            if actual_group == predicted_group:
+                grouped_correct += 1
+
+    # Per-group metrics
+    for group_name in CWE_GROUPS:
+        group_preds = [p for p in predictions if CWE_TO_GROUP.get(p["actual"]) == group_name]
+        if group_preds:
+            group_correct = sum(
+                1 for p in group_preds
+                if CWE_TO_GROUP.get(p["predicted"]) == group_name
+            )
+            per_group[group_name] = {
+                "accuracy": group_correct / len(group_preds),
+                "support": len(group_preds),
+            }
+
     return {
         "accuracy": correct / total if total > 0 else 0,
+        "grouped_accuracy": grouped_correct / grouped_total if grouped_total > 0 else 0,
         "total": total,
         "correct": correct,
+        "grouped_correct": grouped_correct,
         "per_class": per_class,
+        "per_group": per_group,
         "confusion": {k: dict(v) for k, v in confusion.items()},
         "calibration": calibration,
         "predictions": predictions,

@@ -582,13 +582,13 @@ def ensemble_prepare(output: str, model: str, samples_file: str, prompt_subset: 
 # ============================================================================
 
 @cli.command()
-@click.option("--max-per-cwe", "-n", default=100, type=int,
-              help="Maximum samples per CWE class")
+@click.option("--max-per-cwe", "-n", default=None, type=int,
+              help="Maximum samples per CWE class (default: all)")
 @click.option("--model", "-m", default=DEFAULT_MODEL,
               help=f"Model to use. Aliases: {', '.join(MODELS.keys())}")
 @click.option("--output", "-o", default="results/classify", help="Output directory")
 @click.option("--window", "-w", default="24h", help="Batch completion window")
-def classify(max_per_cwe: int, model: str, output: str, window: str):
+def classify(max_per_cwe: int | None, model: str, output: str, window: str):
     """Classify vulnerable code into CWE categories."""
     from .classify import (
         CWE_CLASSES,
@@ -685,13 +685,13 @@ def classify(max_per_cwe: int, model: str, output: str, window: str):
 
 
 @cli.command("classify-realtime")
-@click.option("--max-per-cwe", "-n", default=50, type=int,
-              help="Maximum samples per CWE class")
+@click.option("--max-per-cwe", "-n", default=None, type=int,
+              help="Maximum samples per CWE class (default: all)")
 @click.option("--model", "-m", default="gpt5-mini",
               help="Model to use")
 @click.option("--output", "-o", default="results/classify", help="Output directory")
 @click.option("--concurrency", "-c", default=20, type=int, help="Concurrent requests")
-def classify_realtime(max_per_cwe: int, model: str, output: str, concurrency: int):
+def classify_realtime(max_per_cwe: int | None, model: str, output: str, concurrency: int):
     """Classify vulnerabilities using real-time API."""
     from concurrent.futures import ThreadPoolExecutor, as_completed
     from .classify import (
@@ -829,7 +829,14 @@ def classify_analyze(output: str, model: str):
         click.echo(f"CWE CLASSIFICATION RESULTS: {model_tag}")
         click.echo(f"{'=' * 60}")
 
-        click.echo(f"\nOverall Accuracy: {analysis['accuracy']:.1%} ({analysis['correct']}/{analysis['total']})")
+        click.echo(f"\nFine-grained (24 classes): {analysis['accuracy']:.1%} ({analysis['correct']}/{analysis['total']})")
+        click.echo(f"Grouped (8 categories):    {analysis['grouped_accuracy']:.1%} ({analysis['grouped_correct']}/{analysis['total']})")
+
+        # Per-group accuracy
+        click.echo(f"\n{'Group':<18} {'Accuracy':>10} {'Support':>10}")
+        click.echo("-" * 40)
+        for group_name, metrics in sorted(analysis.get('per_group', {}).items(), key=lambda x: -x[1]['accuracy']):
+            click.echo(f"{group_name:<18} {metrics['accuracy']:>9.1%} {metrics['support']:>10}")
 
         click.echo(f"\n{'CWE':<12} {'Precision':>10} {'Recall':>10} {'F1':>10} {'Support':>10}")
         click.echo("-" * 55)

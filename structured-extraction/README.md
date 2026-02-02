@@ -1,18 +1,46 @@
 # Batch Document Extraction with Vision-Language Models
 
-## Summary
+Extract structured data from documents at scale using vision-language models. Compare batch API (Doubleword) vs real-time API (OpenAI).
 
-We evaluated document extraction from 200 receipt images across five models: three OpenAI models (GPT-5-nano, GPT-5-mini, GPT-5.2) and two Qwen3-VL variants (Doubleword). The Qwen3-235B model achieved the highest accuracy at 91.8%, outperforming all OpenAI models while costing less per request than GPT-5-mini.
+## The Idea
 
-## Experiment
+Document extraction at scale requires balancing accuracy, cost, and speed. This use case compares five models across 200 receipt images, finding that Qwen models outperform all OpenAI variants on this vision task.
 
-- **Dataset**: [SROIE](https://rrc.cvc.uab.es/?ch=13) (ICDAR 2019) — 200 scanned Malaysian receipts
-- **Fields extracted**: vendor_name, date, total
-- **Models tested**:
-  - GPT-5-nano, GPT-5-mini, GPT-5.2 (OpenAI)
-  - Qwen3-VL-30B, Qwen3-VL-235B (Doubleword)
+## Key Results
 
-*Note: We used OpenAI's real-time API for implementation convenience (their batch API doesn't support partial results and expires batches after 24 hours). Cost comparisons below use batch pricing for all providers to ensure a fair comparison.*
+| Model | Accuracy | Cost/Receipt (batch) |
+|-------|----------|---------------------|
+| **Qwen3-235B** | **91.8%** | $0.0006 |
+| Qwen3-30B | 90.0% | $0.0001 |
+| GPT-5-mini | 87.2% | $0.0001 |
+| GPT-5.2 | 85.5% | $0.003 |
+| GPT-5-nano | 85.5% | $0.000075 |
+
+**Key finding:** Qwen3-30B beats GPT-5-mini at the same batch cost with +2.8% higher accuracy.
+
+## Dataset
+
+[SROIE](https://rrc.cvc.uab.es/?ch=13) (ICDAR 2019) — 200 scanned Malaysian receipts with ground truth labels for vendor name, date, and total.
+
+## Quick Start
+
+```bash
+cd structured-extraction && uv sync
+
+# Download dataset
+uv run python -m src.sroie --limit 200
+
+# Run Doubleword batch extraction
+export DOUBLEWORD_API_KEY="your-key"
+uv run python -m src.cli run -i data/sroie/receipts.jsonl -m 30b,235b -n 1
+uv run python -m src.cli status
+uv run python -m src.cli analyze -i data/sroie/receipts.jsonl
+
+# Run GPT real-time extraction
+export OPENAI_API_KEY="your-key"
+uv run python -m src.cli realtime -i data/sroie/receipts.jsonl -m gpt-5-mini
+uv run python -m src.cli analyze -i data/sroie/receipts.jsonl -r results/sroie_gpt5mini
+```
 
 ## Results
 
@@ -33,13 +61,7 @@ We evaluated document extraction from 200 receipt images across five models: thr
 3. **Vendor names are hardest** — 13 percentage point gap between best (85%) and worst (72%)
 4. **Totals are easiest** — all models achieve 96-98%
 
-## Cost & Performance
-
 ### Batch Pricing Comparison
-
-All prices are batch API rates. OpenAI batch = 50% off real-time.
-
-Sources: [OpenAI](https://platform.openai.com/docs/pricing), [Doubleword](https://docs.doubleword.ai/batches/model-pricing)
 
 | Model | Input/1M | Output/1M | Cost (200 receipts) |
 |-------|----------|-----------|---------------------|
@@ -49,7 +71,7 @@ Sources: [OpenAI](https://platform.openai.com/docs/pricing), [Doubleword](https:
 | Qwen3-235B | $0.25 | $0.75 | $0.12 |
 | GPT-5.2 | $1.25 | $5.00 | $0.60 |
 
-### Accuracy vs Cost (Batch)
+### Accuracy vs Cost
 
 | Model | Accuracy | Cost/Receipt | Value (Accuracy per $0.0001) |
 |-------|----------|--------------|------------------------------|
@@ -58,8 +80,6 @@ Sources: [OpenAI](https://platform.openai.com/docs/pricing), [Doubleword](https:
 | GPT-5-mini | 87.2% | $0.0001 | 872% |
 | Qwen3-235B | 91.8% | $0.0006 | 153% |
 | GPT-5.2 | 85.5% | $0.003 | 29% |
-
-**Qwen3-30B beats GPT-5-mini** at the same batch cost ($0.0001/receipt) with +2.8% accuracy.
 
 ## Processing Performance
 
@@ -92,29 +112,6 @@ Vendor name errors dominate across all models. Most stem from receipts showing m
 | Fastest processing | GPT-5.2 (5.1 docs/sec) |
 | Lowest cost | Qwen3-30B ($0.02/200 docs) |
 
-## Reproducing This Experiment
-
-```bash
-cd structured-extraction && uv sync
-
-# Download dataset
-uv run python -m src.sroie --limit 200
-
-# Run Doubleword batch extraction
-export DOUBLEWORD_API_KEY="your-key"
-uv run python -m src.cli run -i data/sroie/receipts.jsonl -m 30b,235b -n 1
-uv run python -m src.cli status
-
-# Run OpenAI real-time extraction
-export OPENAI_API_KEY="your-key"
-uv run python -m src.cli realtime -i data/sroie/receipts.jsonl -o results/gpt5nano -m gpt-5-nano
-uv run python -m src.cli realtime -i data/sroie/receipts.jsonl -o results/gpt5mini -m gpt-5-mini
-uv run python -m src.cli realtime -i data/sroie/receipts.jsonl -o results/gpt52 -m gpt-5.2
-
-# Analyze all results
-uv run python -m src.cli analyze -i data/sroie/receipts.jsonl -r results/sroie_200
-```
-
 ## Conclusion
 
 For document extraction at scale (batch pricing):
@@ -125,3 +122,7 @@ For document extraction at scale (batch pricing):
 4. **GPT-5-nano** is cheapest but least accurate (85.5%)
 
 At equivalent batch pricing, the Qwen models outperform OpenAI on this vision extraction task.
+
+---
+
+*Data: SROIE (ICDAR 2019), 200 scanned receipts. All costs shown use batch API pricing. Sources: [OpenAI](https://platform.openai.com/docs/pricing), [Doubleword](https://docs.doubleword.ai/batches/model-pricing)*

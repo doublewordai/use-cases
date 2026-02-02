@@ -8,7 +8,7 @@ To run this yourself, sign up at [app.doubleword.ai](https://app.doubleword.ai) 
 
 ## Why This Matters
 
-At $0.40 for 4,600 classifications, you can afford to experiment. Try different category groupings, test multiple models, run twice for calibration. If 46% grouped accuracy isn't good enough, you've lost less than a dollar finding out. If it is good enough—or if 66% accuracy on the high-confidence subset works for your use case—you have a working classifier without building anything.
+At $0.40 per run, you can afford to try things. Fine-grained CWE classification doesn't work—20% accuracy isn't useful. Grouped classification does, at least for Memory Safety where the model hits 82%. Running twice gives you a confidence signal. These are things you'd want to know before committing to a classification approach, and batch inference lets you learn them for under a dollar.
 
 ## Results
 

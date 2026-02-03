@@ -1,5 +1,5 @@
 [project]
-name = "image-summarisation"
+name = "image-summarization"
 version = "0.1.0"
 description = "Summarise images at scale using vision-language models via the Doubleword Batch API"
 requires-python = ">=3.11"
@@ -15,7 +15,7 @@ dependencies = [
 ]
 
 [project.scripts]
-image-summarisation = "src.cli:cli"
+image-summarization = "src.cli:cli"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src"]

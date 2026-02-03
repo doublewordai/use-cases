@@ -12,6 +12,9 @@ import pandas as pd
 from PIL import Image
 from tqdm import tqdm
 
+# Unsplash originals can exceed Pillow's default pixel limit
+Image.MAX_IMAGE_PIXELS = None
+
 from .batch import (
     count_tokens,
     create_batch,

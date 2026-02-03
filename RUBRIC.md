@@ -83,6 +83,7 @@ Conversational, technical, direct. Explaining something interesting to a smart c
 - "Obviously," "easy," "just" (dismissive)
 - Em dashes, emojis
 - Bulleted lists without analysis—have a high threshold for using them
+- Avoid LLM-isms - "It's not X-It's Y", "It's not just something - it's something else", em dashes, etc.
 
 ### Structure
 
@@ -91,7 +92,7 @@ Use cases serve twin goals:
 1. **Results**: Here's what you can achieve with batch inference
 2. **Replication**: Here's how to do it yourself for similar tasks
 
-These can be separate sections. The results hook the reader; the replication empowers them.
+These can be separate sections. 
 
 ### Code Examples
 

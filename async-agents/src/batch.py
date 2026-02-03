@@ -1,4 +1,4 @@
-"""Batch API utilities for async research agents."""
+"""Batch API utilities for async research agents with tool calling."""
 
 import json
 import os
@@ -36,21 +36,32 @@ def get_client(provider: str = "doubleword") -> tuple[OpenAI, str]:
 
 
 def create_batch_file(requests_data: list[dict], output_path: Path) -> Path:
-    """Write requests to JSONL file for batch processing."""
+    """Write requests to JSONL file for batch processing.
+
+    Supports the tools field for function calling. Each request dict can contain:
+    - custom_id, model, messages (required)
+    - tools, tool_choice (optional, for function calling)
+    - temperature, max_tokens (optional)
+    """
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, "w") as f:
         for req in requests_data:
+            body = {
+                "model": req["model"],
+                "messages": req["messages"],
+                "temperature": req.get("temperature", 0),
+                "max_tokens": req.get("max_tokens", 4096),
+            }
+            if "tools" in req:
+                body["tools"] = req["tools"]
+            if "tool_choice" in req:
+                body["tool_choice"] = req["tool_choice"]
             line = {
                 "custom_id": req["custom_id"],
                 "method": "POST",
                 "url": "/v1/chat/completions",
-                "body": {
-                    "model": req["model"],
-                    "messages": req["messages"],
-                    "temperature": req.get("temperature", 0),
-                    "max_tokens": req.get("max_tokens", 512),
-                },
+                "body": body,
             }
             f.write(json.dumps(line) + "\n")
     return output_path
@@ -122,6 +133,31 @@ def parse_results(results_path: Path) -> dict[str, dict]:
                 obj = json.loads(line)
                 results[obj["custom_id"]] = obj
     return results
+
+
+def extract_message(result: dict) -> dict:
+    """Extract the assistant message from a batch result.
+
+    Returns the full message dict which may contain 'content' and/or 'tool_calls'.
+    """
+    try:
+        return result["response"]["body"]["choices"][0]["message"]
+    except (KeyError, IndexError):
+        return {"role": "assistant", "content": ""}
+
+
+def extract_content(result: dict) -> str:
+    """Extract the text content from a batch result."""
+    msg = extract_message(result)
+    return msg.get("content") or ""
+
+
+def get_finish_reason(result: dict) -> str:
+    """Extract the finish reason from a batch result."""
+    try:
+        return result["response"]["body"]["choices"][0]["finish_reason"]
+    except (KeyError, IndexError):
+        return "unknown"
 
 
 def count_tokens(results: dict) -> dict:

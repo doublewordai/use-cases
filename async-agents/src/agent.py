@@ -1,233 +1,223 @@
-"""Agent logic for multi-round web research via the batch API.
+"""Agent orchestrator for parallel tool-calling research agents.
 
-Each research round:
-1. Generate search queries (batch API)
-2. Execute queries via Serper (realtime)
-3. Fetch top pages via Jina Reader (realtime)
-4. Analyze fetched content (batch API)
-5. Generate follow-up queries (batch API)
+Each agent independently researches a sub-query using tools (web_search,
+fetch_page). All agents are batched together and run in parallel. The
+orchestrator loops: submit batch -> poll -> process responses -> execute
+tool calls locally -> resubmit agents that need more work.
+
+Agents complete independently — some finish in 2 iterations, others in 5.
 """
 
-import re
+from __future__ import annotations
 
-from .prompts import (
-    ANALYSIS_PROMPT,
-    ANALYSIS_SYSTEM,
-    FOLLOWUP_QUERY_PROMPT,
-    QUERY_GENERATION_SYSTEM,
-    SEED_QUERY_PROMPT,
-    SYNTHESIS_PROMPT,
-    SYNTHESIS_SYSTEM,
-)
-from .scrape import fetch_urls
-from .search import extract_urls, search_batch
+import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass, field
+
+import click
+
+from .batch import extract_message, get_finish_reason
+from .prompts import RESEARCH_AGENT_SYSTEM
+from .tools import TOOL_DEFINITIONS, execute_tool
 
 
-def build_seed_query_requests(topic: str, model: str, count: int = 8) -> list[dict]:
-    """Create batch request for generating initial search queries."""
-    return [
-        {
-            "custom_id": "seed-queries",
-            "model": model,
-            "messages": [
-                {"role": "system", "content": QUERY_GENERATION_SYSTEM},
+@dataclass
+class Agent:
+    """A single research agent with tool-calling capability."""
+
+    id: str
+    sub_query: str
+    model: str
+    status: str = "pending"  # pending | in_progress | completed | failed
+    messages: list[dict] = field(default_factory=list)
+    iteration: int = 0
+    findings: str = ""
+
+    def __post_init__(self):
+        if not self.messages:
+            self.messages = [
+                {"role": "system", "content": RESEARCH_AGENT_SYSTEM},
                 {
                     "role": "user",
-                    "content": SEED_QUERY_PROMPT.format(topic=topic, count=count),
+                    "content": f"Research the following topic thoroughly: {self.sub_query}",
                 },
-            ],
-            "temperature": 0.7,
-            "max_tokens": 2048,
-        }
-    ]
+            ]
 
 
-def build_followup_query_requests(
-    findings_text: str,
-    topic: str,
+def create_agents(
+    sub_queries: list[str],
     model: str,
-    round_num: int,
-    count: int = 8,
-) -> list[dict]:
-    """Build batch request for follow-up search queries based on findings."""
+) -> list[Agent]:
+    """Create one agent per sub-query."""
     return [
-        {
-            "custom_id": f"round-{round_num}-queries",
-            "model": model,
-            "messages": [
-                {"role": "system", "content": QUERY_GENERATION_SYSTEM},
-                {
-                    "role": "user",
-                    "content": FOLLOWUP_QUERY_PROMPT.format(
-                        topic=topic,
-                        findings=findings_text,
-                        count=count,
-                    ),
-                },
-            ],
-            "temperature": 0.7,
-            "max_tokens": 2048,
-        }
+        Agent(id=f"agent-{i}", sub_query=q, model=model)
+        for i, q in enumerate(sub_queries)
     ]
 
 
-def build_analysis_requests(
-    sources: list[dict], topic: str, model: str, round_num: int
-) -> list[dict]:
-    """Build batch requests to analyze fetched web content.
-
-    Args:
-        sources: List of dicts with 'url', 'title', 'content' keys
-        topic: Research topic
-        model: Model ID
-        round_num: Current round number
-
-    Returns:
-        List of batch request dicts
-    """
+def build_batch_requests(agents: list[Agent]) -> list[dict]:
+    """Build JSONL-ready batch requests for all ready agents."""
     requests_data = []
-    for i, source in enumerate(sources):
-        # Truncate content to fit in context window
-        content = source["content"][:15000]
+    for agent in agents:
+        if agent.status not in ("pending", "in_progress"):
+            continue
         requests_data.append(
             {
-                "custom_id": f"round-{round_num}-src-{i}",
-                "model": model,
-                "messages": [
-                    {"role": "system", "content": ANALYSIS_SYSTEM},
-                    {
-                        "role": "user",
-                        "content": ANALYSIS_PROMPT.format(
-                            topic=topic,
-                            url=source["url"],
-                            title=source.get("title", "Unknown"),
-                            content=content,
-                        ),
-                    },
-                ],
+                "custom_id": f"{agent.id}-iter-{agent.iteration}",
+                "model": agent.model,
+                "messages": agent.messages,
+                "tools": TOOL_DEFINITIONS,
                 "temperature": 0,
-                "max_tokens": 2048,
+                "max_tokens": 4096,
             }
         )
+        agent.status = "in_progress"
     return requests_data
 
 
-def build_synthesis_request(
-    all_findings: dict[str, str],
-    topic: str,
-    model: str,
-    num_rounds: int,
-) -> list[dict]:
-    """Build the final synthesis batch request from all analyzed sources."""
-    findings_text = "\n\n".join(
-        f"--- {cid} ---\n{text}" for cid, text in all_findings.items()
-    )
+def process_responses(agents: list[Agent], results: dict[str, dict]) -> None:
+    """Update agent states based on batch results.
 
-    return [
-        {
-            "custom_id": "synthesis",
-            "model": model,
-            "messages": [
-                {"role": "system", "content": SYNTHESIS_SYSTEM},
-                {
-                    "role": "user",
-                    "content": SYNTHESIS_PROMPT.format(
-                        topic=topic,
-                        num_rounds=num_rounds,
-                        findings=findings_text,
-                    ),
-                },
-            ],
-            "temperature": 0,
-            "max_tokens": 4096,
-        }
-    ]
-
-
-def extract_queries(text: str) -> list[str]:
-    """Parse numbered queries/questions from model output."""
-    lines = text.strip().split("\n")
-    queries = []
-    for line in lines:
-        line = line.strip()
-        match = re.match(r"^\d+[.):\-]\s*(.+)$", line)
-        if match:
-            query = match.group(1).strip().strip('"').strip("'")
-            if query:
-                queries.append(query)
-    return queries
-
-
-def extract_content(result: dict) -> str:
-    """Extract the assistant message content from a batch result."""
-    try:
-        return result["response"]["body"]["choices"][0]["message"]["content"]
-    except (KeyError, IndexError):
-        return ""
-
-
-def execute_searches(queries: list[str], results_per_query: int = 5) -> dict:
-    """Execute search queries via Serper API.
-
-    Args:
-        queries: List of search query strings
-        results_per_query: Max results per query
-
-    Returns:
-        Dict with 'all_results' (list of search result dicts) and
-        'urls' (deduplicated list of URLs)
+    For each agent that was in the batch:
+    - finish_reason="stop" -> agent completed, store findings
+    - finish_reason="tool_calls" -> store tool calls for execution
+    - finish_reason="length" -> agent failed (context too long)
     """
-    search_results = search_batch(queries, max_results=results_per_query)
+    agent_map = {a.id: a for a in agents}
 
-    all_results = []
-    all_urls = []
-    seen_urls = set()
-
-    for query, result in search_results.items():
-        if "error" in result and result.get("results") == []:
+    for custom_id, result in results.items():
+        # custom_id format: "agent-{id}-iter-{n}"
+        parts = custom_id.rsplit("-iter-", 1)
+        agent_id = parts[0]
+        agent = agent_map.get(agent_id)
+        if not agent:
             continue
-        for r in result.get("results", []):
-            all_results.append({**r, "query": query})
-            url = r.get("url")
-            if url and url not in seen_urls:
-                seen_urls.add(url)
-                all_urls.append(url)
 
-    return {"all_results": all_results, "urls": all_urls}
+        finish_reason = get_finish_reason(result)
+        message = extract_message(result)
 
-
-def fetch_sources(
-    urls: list[str], search_results: list[dict], max_pages: int = 10
-) -> list[dict]:
-    """Fetch page content for top URLs and combine with search metadata.
-
-    Args:
-        urls: Deduplicated list of URLs to fetch
-        search_results: List of search result dicts with url/title/snippet
-        max_pages: Maximum number of pages to fetch
-
-    Returns:
-        List of source dicts with url, title, content
-    """
-    urls_to_fetch = urls[:max_pages]
-    fetched = fetch_urls(urls_to_fetch)
-
-    # Build title lookup from search results
-    title_lookup = {}
-    for r in search_results:
-        if r.get("url") and r.get("title"):
-            title_lookup[r["url"]] = r["title"]
-
-    sources = []
-    for url in urls_to_fetch:
-        content = fetched.get(url)
-        if content:
-            sources.append(
+        if finish_reason == "stop":
+            # Agent decided it's done — append final message and mark complete
+            agent.messages.append(
                 {
-                    "url": url,
-                    "title": title_lookup.get(url, "Unknown"),
-                    "content": content,
+                    "role": "assistant",
+                    "content": message.get("content", ""),
                 }
             )
+            agent.findings = message.get("content", "")
+            agent.status = "completed"
+            agent.iteration += 1
 
-    return sources
+        elif finish_reason in ("tool_calls", "function_call"):
+            # Agent wants to call tools — append the assistant message with tool_calls
+            assistant_msg = {"role": "assistant", "content": message.get("content")}
+            if "tool_calls" in message:
+                assistant_msg["tool_calls"] = message["tool_calls"]
+            agent.messages.append(assistant_msg)
+            agent.iteration += 1
+            # Status stays in_progress — tools need execution
+
+        else:
+            # length, error, etc.
+            agent.status = "failed"
+            agent.iteration += 1
+
+
+def execute_pending_tools(agents: list[Agent], max_workers: int = 10) -> None:
+    """Execute pending tool calls for all agents that have them.
+
+    Tool calls are executed in parallel across all agents. Results are
+    appended to each agent's message history as role="tool" messages.
+    """
+    # Collect all tool calls with their agent references
+    work_items = []  # (agent, tool_call)
+    for agent in agents:
+        if agent.status != "in_progress":
+            continue
+        # Check if the last message has tool_calls
+        if not agent.messages:
+            continue
+        last_msg = agent.messages[-1]
+        if last_msg.get("role") != "assistant" or "tool_calls" not in last_msg:
+            continue
+        for tc in last_msg["tool_calls"]:
+            work_items.append((agent, tc))
+
+    if not work_items:
+        return
+
+    click.echo(
+        f"  Executing {len(work_items)} tool calls across {_count_agents_with_tools(agents)} agents..."
+    )
+
+    # Execute all tool calls in parallel
+    results_map: dict[str, tuple[Agent, str]] = {}  # tool_call_id -> (agent, result)
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {}
+        for agent, tc in work_items:
+            func = tc["function"]
+            future = executor.submit(execute_tool, func["name"], func["arguments"])
+            futures[future] = (agent, tc)
+
+        for future in as_completed(futures):
+            agent, tc = futures[future]
+            try:
+                result = future.result()
+            except Exception as e:
+                result = json.dumps({"error": str(e)})
+            results_map[tc["id"]] = (agent, result)
+
+    # Append tool results to agent messages in the correct order
+    for agent in agents:
+        if agent.status != "in_progress":
+            continue
+        if not agent.messages:
+            continue
+        last_msg = agent.messages[-1]
+        if last_msg.get("role") != "assistant" or "tool_calls" not in last_msg:
+            continue
+        for tc in last_msg["tool_calls"]:
+            if tc["id"] in results_map:
+                _, result_content = results_map[tc["id"]]
+                agent.messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tc["id"],
+                        "content": result_content,
+                    }
+                )
+
+
+def get_ready_agents(agents: list[Agent]) -> list[Agent]:
+    """Get agents that are ready for the next batch submission."""
+    ready = []
+    for agent in agents:
+        if agent.status not in ("pending", "in_progress"):
+            continue
+        # An in_progress agent is ready if its last message is a tool result
+        # (meaning tool execution is done and it needs another model turn)
+        if agent.status == "in_progress" and agent.messages:
+            last_msg = agent.messages[-1]
+            if last_msg.get("role") == "tool":
+                ready.append(agent)
+            # Also ready if status is pending (first iteration)
+        elif agent.status == "pending":
+            ready.append(agent)
+    return ready
+
+
+def all_done(agents: list[Agent]) -> bool:
+    """Check if all agents have completed or failed."""
+    return all(a.status in ("completed", "failed") for a in agents)
+
+
+def _count_agents_with_tools(agents: list[Agent]) -> int:
+    """Count agents that have pending tool calls."""
+    count = 0
+    for agent in agents:
+        if agent.status != "in_progress" or not agent.messages:
+            continue
+        last_msg = agent.messages[-1]
+        if last_msg.get("role") == "assistant" and "tool_calls" in last_msg:
+            count += 1
+    return count

@@ -1,38 +1,43 @@
-"""CLI for running async research agents via the batch API with web search.
+"""CLI for running parallel tool-calling research agents via the batch API.
 
-Each research round interleaves realtime web search with batch analysis:
-1. Generate search queries (batch)
-2. Execute queries via Serper API (realtime)
-3. Fetch pages via Jina Reader (realtime)
-4. Analyze content (batch)
-5. Generate follow-up queries (batch)
+Architecture:
+1. Generate sub-queries for a topic (small batch or inline)
+2. Create N agents, one per sub-query, each with tool-calling capability
+3. Orchestrator loop: submit batch -> poll -> process -> execute tools -> repeat
+4. When all agents complete, run synthesis batch for final report
 """
 
 import json
-import os
+import re
 from pathlib import Path
 
 import click
 
 from .agent import (
-    build_analysis_requests,
-    build_followup_query_requests,
-    build_seed_query_requests,
-    build_synthesis_request,
-    execute_searches,
-    extract_content,
-    extract_queries,
-    fetch_sources,
+    Agent,
+    all_done,
+    build_batch_requests,
+    create_agents,
+    execute_pending_tools,
+    get_ready_agents,
+    process_responses,
 )
 from .batch import (
     count_tokens,
     create_batch,
     create_batch_file,
     download_results,
+    extract_content,
     get_client,
     parse_results,
     upload_batch_file,
     wait_for_batch,
+)
+from .prompts import (
+    SUB_QUERY_PROMPT,
+    SUB_QUERY_SYSTEM,
+    SYNTHESIS_PROMPT,
+    SYNTHESIS_SYSTEM,
 )
 
 MODELS = {
@@ -43,6 +48,7 @@ MODELS = {
     "gpt5.2": "gpt-5.2",
 }
 DEFAULT_MODEL = "30b"
+MAX_ITERATIONS = 10
 
 
 def _run_batch(
@@ -74,13 +80,26 @@ def _run_batch(
     return parse_results(results_path)
 
 
+def _extract_queries(text: str) -> list[str]:
+    """Parse numbered queries from model output."""
+    queries = []
+    for line in text.strip().split("\n"):
+        line = line.strip()
+        match = re.match(r"^\d+[.):\-]\s*(.+)$", line)
+        if match:
+            query = match.group(1).strip().strip('"').strip("'")
+            if query:
+                queries.append(query)
+    return queries
+
+
 @click.group()
 def cli():
-    """Async research agent using the Doubleword Batch API.
+    """Parallel tool-calling research agents via the Doubleword Batch API.
 
-    Runs multi-round web research on any topic. Each round searches the web
-    via Serper API, fetches pages via Jina Reader, and analyzes content via
-    the batch API.
+    Spawns multiple research agents that independently search the web and
+    read pages using tool calling. All agents run in parallel within each
+    batch round. The model decides what tools to call and when to stop.
     """
     pass
 
@@ -99,197 +118,219 @@ def cli():
     default="doubleword",
     type=click.Choice(["doubleword", "openai"]),
 )
-@click.option("--rounds", default=3, help="Number of research rounds (default: 3)")
 @click.option(
-    "--queries-per-round",
+    "--agents",
+    "num_agents",
     default=5,
-    help="Search queries per round (default: 5)",
+    help="Number of parallel research agents (default: 5)",
 )
 @click.option(
-    "--pages-per-round",
-    default=8,
-    help="Max pages to fetch per round (default: 8)",
+    "--max-iterations",
+    default=MAX_ITERATIONS,
+    help=f"Max tool-calling iterations per agent (default: {MAX_ITERATIONS})",
 )
 @click.option("-o", "--output", default="results/", help="Output directory")
-@click.option("--dry-run", is_flag=True, help="Create batch files but don't submit")
+@click.option(
+    "--dry-run", is_flag=True, help="Create initial batch file but don't submit"
+)
 def run(
     topic: str,
     model: str,
     provider: str,
-    rounds: int,
-    queries_per_round: int,
-    pages_per_round: int,
+    num_agents: int,
+    max_iterations: int,
     output: str,
     dry_run: bool,
 ):
-    """Run a multi-round research agent on a topic.
+    """Run parallel research agents on a topic.
+
+    First generates sub-queries to cover different angles of the topic,
+    then launches one agent per sub-query. Each agent independently
+    searches the web and reads pages using tool calling. The model
+    decides what to search, what to read, and when it has enough
+    information.
 
     Requires SERPER_API_KEY for web search and DOUBLEWORD_API_KEY (or
     OPENAI_API_KEY) for batch inference.
     """
-    # Check required env vars
-    if not dry_run:
-        if not os.environ.get("SERPER_API_KEY"):
-            raise click.ClickException(
-                "SERPER_API_KEY environment variable not set. "
-                "Get a free key at https://serper.dev"
-            )
-
     model_id = MODELS.get(model, model)
     output_dir = Path(output) / topic.lower().replace(" ", "-")[:50]
     output_dir.mkdir(parents=True, exist_ok=True)
 
     click.echo(f"Topic: {topic}")
     click.echo(f"Model: {model_id}")
-    click.echo(f"Rounds: {rounds}")
-    click.echo(f"Queries per round: {queries_per_round}")
-    click.echo(f"Pages per round: {pages_per_round}")
+    click.echo(f"Agents: {num_agents}")
+    click.echo(f"Max iterations: {max_iterations}")
     click.echo()
 
-    all_findings = {}
-    all_sources_metadata = []
     total_tokens = {"input_tokens": 0, "output_tokens": 0}
 
-    # Step 1: Generate seed search queries (batch)
+    # --- Step 1: Generate sub-queries ---
     click.echo("=" * 60)
-    click.echo("Generating seed search queries...")
+    click.echo("Step 1: Generating research sub-queries")
     click.echo("=" * 60)
 
-    seed_requests = build_seed_query_requests(topic, model_id, count=queries_per_round)
-    seed_file = output_dir / "round-0-seed-input.jsonl"
-    create_batch_file(seed_requests, seed_file)
+    sub_query_requests = [
+        {
+            "custom_id": "sub-queries",
+            "model": model_id,
+            "messages": [
+                {"role": "system", "content": SUB_QUERY_SYSTEM},
+                {
+                    "role": "user",
+                    "content": SUB_QUERY_PROMPT.format(topic=topic, count=num_agents),
+                },
+            ],
+            "temperature": 0.7,
+            "max_tokens": 2048,
+        }
+    ]
+
+    sub_query_file = output_dir / "sub-queries-input.jsonl"
+    create_batch_file(sub_query_requests, sub_query_file)
 
     if dry_run:
-        click.echo(f"Dry run - batch file created: {seed_file}")
-        click.echo("Skipping API calls. Exiting.")
+        click.echo(f"\nDry run — sub-query batch file: {sub_query_file}")
+        # Also create the initial agent batch to show tool definitions
+        dummy_queries = [f"Sub-query {i + 1} for: {topic}" for i in range(num_agents)]
+        agents = create_agents(dummy_queries, model_id)
+        agent_requests = build_batch_requests(agents)
+        agent_file = output_dir / "agents-iter-0-input.jsonl"
+        create_batch_file(agent_requests, agent_file)
+        click.echo(f"Agent batch file (with tools): {agent_file}")
+        click.echo(
+            f"\nTool definitions included: {len(agent_requests[0].get('tools', []))} tools"
+        )
+        for tool in agent_requests[0].get("tools", []):
+            click.echo(
+                f"  - {tool['function']['name']}: {tool['function']['description'][:60]}..."
+            )
+        click.echo("\nSkipping API calls. Exiting.")
         return
 
     client, _ = get_client(provider)
 
-    seed_results = _run_batch(
+    sub_query_results = _run_batch(
         client,
         provider,
-        seed_requests,
-        seed_file,
-        output_dir / "round-0-seed-output.jsonl",
+        sub_query_requests,
+        sub_query_file,
+        output_dir / "sub-queries-output.jsonl",
     )
-    tokens = count_tokens(seed_results)
+    tokens = count_tokens(sub_query_results)
     total_tokens["input_tokens"] += tokens["input_tokens"]
     total_tokens["output_tokens"] += tokens["output_tokens"]
 
-    seed_content = extract_content(seed_results["seed-queries"])
-    queries = extract_queries(seed_content)
-    if not queries:
+    sub_query_text = extract_content(sub_query_results["sub-queries"])
+    sub_queries = _extract_queries(sub_query_text)
+    if not sub_queries:
         raise click.ClickException(
-            f"Failed to extract search queries.\nRaw output:\n{seed_content}"
+            f"Failed to extract sub-queries.\nRaw output:\n{sub_query_text}"
         )
+    sub_queries = sub_queries[:num_agents]
 
-    queries = queries[:queries_per_round]
-    click.echo(f"Generated {len(queries)} search queries:")
-    for q in queries:
-        click.echo(f"  - {q}")
+    click.echo(f"\nGenerated {len(sub_queries)} sub-queries:")
+    for i, q in enumerate(sub_queries):
+        click.echo(f"  {i + 1}. {q}")
 
-    # Research rounds
-    for round_num in range(rounds):
-        click.echo()
-        click.echo("=" * 60)
-        click.echo(f"Round {round_num}: Searching & analyzing")
-        click.echo("=" * 60)
+    # --- Step 2: Create agents and run orchestrator loop ---
+    click.echo()
+    click.echo("=" * 60)
+    click.echo("Step 2: Running parallel research agents")
+    click.echo("=" * 60)
 
-        # Step 2: Execute web searches (realtime)
-        click.echo(f"\nSearching the web ({len(queries)} queries)...")
-        search_data = execute_searches(queries, results_per_query=5)
+    agents = create_agents(sub_queries, model_id)
+    iteration = 0
+
+    while not all_done(agents) and iteration < max_iterations:
+        ready = get_ready_agents(agents)
+        if not ready:
+            # All in-progress agents have tool calls pending
+            # This shouldn't happen if execute_pending_tools ran, but guard against it
+            break
+
+        click.echo(f"\n--- Iteration {iteration} ---")
+        active_ids = [a.id for a in ready]
+        completed = sum(1 for a in agents if a.status == "completed")
         click.echo(
-            f"  Found {len(search_data['all_results'])} results, "
-            f"{len(search_data['urls'])} unique URLs"
+            f"  Active agents: {len(ready)}/{len(agents)} (completed: {completed})"
         )
 
-        # Step 3: Fetch pages (realtime)
-        click.echo(f"Fetching top {pages_per_round} pages...")
-        sources = fetch_sources(
-            search_data["urls"],
-            search_data["all_results"],
-            max_pages=pages_per_round,
-        )
-        click.echo(f"  Successfully fetched {len(sources)} pages")
+        # Build and submit batch for all ready agents
+        batch_requests = build_batch_requests(ready)
+        if not batch_requests:
+            break
 
-        if not sources:
-            click.echo("  No pages fetched, skipping analysis for this round")
-            continue
-
-        # Save source metadata
-        round_sources = []
-        for s in sources:
-            meta = {"url": s["url"], "title": s["title"], "round": round_num}
-            round_sources.append(meta)
-            all_sources_metadata.append(meta)
-
-        with open(output_dir / f"round-{round_num}-sources.json", "w") as f:
-            json.dump(round_sources, f, indent=2)
-
-        # Step 4: Analyze fetched content (batch)
-        click.echo(f"Analyzing {len(sources)} sources via batch API...")
-        analysis_requests = build_analysis_requests(sources, topic, model_id, round_num)
-        analysis_results = _run_batch(
+        batch_results = _run_batch(
             client,
             provider,
-            analysis_requests,
-            output_dir / f"round-{round_num}-analysis-input.jsonl",
-            output_dir / f"round-{round_num}-analysis-output.jsonl",
+            batch_requests,
+            output_dir / f"agents-iter-{iteration}-input.jsonl",
+            output_dir / f"agents-iter-{iteration}-output.jsonl",
         )
-        tokens = count_tokens(analysis_results)
+        tokens = count_tokens(batch_results)
         total_tokens["input_tokens"] += tokens["input_tokens"]
         total_tokens["output_tokens"] += tokens["output_tokens"]
 
-        round_findings = {
-            cid: extract_content(r) for cid, r in analysis_results.items()
-        }
-        all_findings.update(round_findings)
-        click.echo(f"  Analyzed {len(round_findings)} sources")
+        # Process responses — updates agent states
+        process_responses(agents, batch_results)
 
-        # Step 5: Generate follow-up queries for next round (batch)
-        if round_num < rounds - 1:
-            click.echo("\nGenerating follow-up search queries...")
-            findings_text = "\n\n".join(
-                f"[{cid}]: {text[:500]}" for cid, text in round_findings.items()
-            )
-            followup_requests = build_followup_query_requests(
-                findings_text,
-                topic,
-                model_id,
-                round_num + 1,
-                count=queries_per_round,
-            )
-            followup_results = _run_batch(
-                client,
-                provider,
-                followup_requests,
-                output_dir / f"round-{round_num}-followup-input.jsonl",
-                output_dir / f"round-{round_num}-followup-output.jsonl",
-            )
-            tokens = count_tokens(followup_results)
-            total_tokens["input_tokens"] += tokens["input_tokens"]
-            total_tokens["output_tokens"] += tokens["output_tokens"]
+        completed_this_round = sum(
+            1
+            for a in agents
+            if a.status == "completed" and a.iteration == (iteration + 1)
+            # iteration was incremented in process_responses
+        )
+        if completed_this_round:
+            click.echo(f"  {completed_this_round} agent(s) completed this round")
 
-            followup_content = extract_content(
-                followup_results[f"round-{round_num + 1}-queries"]
-            )
-            queries = extract_queries(followup_content)
-            if not queries:
-                click.echo("  No follow-up queries extracted, stopping early.")
-                break
-            queries = queries[:queries_per_round]
-            click.echo(f"  Generated {len(queries)} follow-up queries:")
-            for q in queries:
-                click.echo(f"    - {q}")
+        # Execute tool calls for agents that need them
+        execute_pending_tools(agents)
 
-    # Synthesis
+        iteration += 1
+
+    # Report agent statuses
+    click.echo()
+    for agent in agents:
+        status_icon = "done" if agent.status == "completed" else agent.status
+        click.echo(
+            f"  {agent.id}: {status_icon} after {agent.iteration} iterations — {agent.sub_query[:60]}"
+        )
+
+    # --- Step 3: Synthesis ---
     click.echo()
     click.echo("=" * 60)
-    click.echo("Synthesizing final report")
+    click.echo("Step 3: Synthesizing final report")
     click.echo("=" * 60)
 
-    synthesis_requests = build_synthesis_request(all_findings, topic, model_id, rounds)
+    completed_agents = [a for a in agents if a.status == "completed" and a.findings]
+    if not completed_agents:
+        raise click.ClickException("No agents completed successfully.")
+
+    findings_text = "\n\n".join(
+        f"--- Agent {a.id}: {a.sub_query} ---\n{a.findings}" for a in completed_agents
+    )
+
+    synthesis_requests = [
+        {
+            "custom_id": "synthesis",
+            "model": model_id,
+            "messages": [
+                {"role": "system", "content": SYNTHESIS_SYSTEM},
+                {
+                    "role": "user",
+                    "content": SYNTHESIS_PROMPT.format(
+                        topic=topic,
+                        num_agents=len(completed_agents),
+                        findings=findings_text,
+                    ),
+                },
+            ],
+            "temperature": 0,
+            "max_tokens": 4096,
+        }
+    ]
+
     synthesis_results = _run_batch(
         client,
         provider,
@@ -306,29 +347,44 @@ def run(
     report_path = output_dir / "report.md"
     with open(report_path, "w") as f:
         f.write(report_text)
-    click.echo(f"Report saved to: {report_path}")
+    click.echo(f"\nReport saved to: {report_path}")
+
+    # Save agent conversation logs
+    agent_logs = []
+    for agent in agents:
+        agent_logs.append(
+            {
+                "id": agent.id,
+                "sub_query": agent.sub_query,
+                "status": agent.status,
+                "iterations": agent.iteration,
+                "message_count": len(agent.messages),
+            }
+        )
+    with open(output_dir / "agent-logs.json", "w") as f:
+        json.dump(agent_logs, f, indent=2)
 
     # Save summary
     summary = {
         "topic": topic,
         "model": model_id,
         "provider": provider,
-        "rounds": rounds,
-        "queries_per_round": queries_per_round,
-        "pages_per_round": pages_per_round,
-        "total_sources_fetched": len(all_sources_metadata),
-        "total_findings": len(all_findings),
+        "num_agents": len(agents),
+        "max_iterations": max_iterations,
+        "agents_completed": sum(1 for a in agents if a.status == "completed"),
+        "agents_failed": sum(1 for a in agents if a.status == "failed"),
+        "total_batch_rounds": iteration,
         "tokens": total_tokens,
-        "sources": all_sources_metadata,
+        "sub_queries": [a.sub_query for a in agents],
     }
     with open(output_dir / "summary.json", "w") as f:
         json.dump(summary, f, indent=2)
 
     click.echo()
-    click.echo(f"Sources fetched: {len(all_sources_metadata)}")
-    click.echo(f"Analyses completed: {len(all_findings)}")
+    click.echo(f"Agents completed: {summary['agents_completed']}/{len(agents)}")
+    click.echo(f"Batch rounds: {iteration}")
     click.echo(
-        f"Tokens used - Input: {total_tokens['input_tokens']:,}, "
+        f"Tokens used — Input: {total_tokens['input_tokens']:,}, "
         f"Output: {total_tokens['output_tokens']:,}"
     )
 
@@ -374,9 +430,10 @@ def report(output: str):
             click.echo(f"\n{'=' * 60}")
             click.echo(f"Topic: {summary['topic']}")
             click.echo(f"Model: {summary['model']}")
-            click.echo(f"Rounds: {summary['rounds']}")
-            click.echo(f"Sources: {summary.get('total_sources_fetched', 'N/A')}")
-            click.echo(f"Analyses: {summary['total_findings']}")
+            click.echo(
+                f"Agents: {summary.get('num_agents', 'N/A')} ({summary.get('agents_completed', 'N/A')} completed)"
+            )
+            click.echo(f"Batch rounds: {summary.get('total_batch_rounds', 'N/A')}")
             click.echo(
                 f"Tokens: {summary['tokens']['input_tokens']:,} in / "
                 f"{summary['tokens']['output_tokens']:,} out"

@@ -1,4 +1,4 @@
-"""CLI for image summarisation via the Doubleword Batch API."""
+"""CLI for image summarization via the Doubleword Batch API."""
 
 import asyncio
 import base64
@@ -118,7 +118,7 @@ async def fetch_images(urls: list[str], cache_dir: Path) -> list[str | None]:
 
 @click.group()
 def cli():
-    """Image summarisation at scale with the Doubleword Batch API."""
+    """Image summarization at scale with the Doubleword Batch API."""
     pass
 
 
@@ -150,7 +150,7 @@ def cli():
 )
 @click.option("--dry-run", is_flag=True, help="Prepare batch file but don't submit")
 def run(input_path: str, output_dir: str, model: str, num_images: int, dry_run: bool):
-    """Fetch images, build prompts, and submit a batch for summarisation."""
+    """Fetch images, build prompts, and submit a batch for summarization."""
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -239,7 +239,7 @@ def run(input_path: str, output_dir: str, model: str, num_images: int, dry_run: 
     with open(info_path, "w") as f:
         json.dump(batch_info, f, indent=2)
 
-    click.echo(f"Batch submitted. Run 'image-summarisation status' to check progress.")
+    click.echo(f"Batch submitted. Run 'image-summarization status' to check progress.")
 
 
 @cli.command()

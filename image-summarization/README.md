@@ -1,4 +1,4 @@
-# Summarise 1,000 Images for $0.05
+# Summarize 1,000 Images for $0.05
 
 **Vision-language batch inference turns image captioning from a manual task into an automated pipeline**
 
@@ -44,7 +44,7 @@ The cost difference grows linearly. At 100,000 images, the gap between Qwen3-30B
 
 ### Limitations
 
-**No ground truth evaluation.** Image summarisation is subjective, so we have no accuracy metric. The summaries look reasonable on manual inspection, but we haven't run a systematic quality assessment comparing models or measuring factual consistency against image content.
+**No ground truth evaluation.** Image summarization is subjective, so we have no accuracy metric. The summaries look reasonable on manual inspection, but we haven't run a systematic quality assessment comparing models or measuring factual consistency against image content.
 
 **Single prompt.** We used one prompt template for all images. Different use cases (alt-text for accessibility, product descriptions, social media posts) would benefit from tailored prompts, and quality may vary across them.
 
@@ -55,18 +55,18 @@ The cost difference grows linearly. At 100,000 images, the gap between Qwen3-30B
 ### Setup
 
 ```bash
-cd image-summarisation && uv sync
+cd image-summarization && uv sync
 ```
 
 Download the [Unsplash Lite dataset](https://github.com/unsplash/datasets) and extract it so that `unsplash-research-dataset-lite-latest/photos.csv000` exists in this directory.
 
-### Running summarisation
+### Running summarization
 
 Set your API key and submit a batch:
 
 ```bash
 export DOUBLEWORD_API_KEY="your-key"
-uv run image-summarisation run -i unsplash-research-dataset-lite-latest/photos.csv000 -m 30b -n 1000
+uv run image-summarization run -i unsplash-research-dataset-lite-latest/photos.csv000 -m 30b -n 1000
 ```
 
 The `-m 30b` flag selects Qwen3-VL-30B. Use `-m 235b` for the larger model, or any model alias from the standard set.
@@ -74,13 +74,13 @@ The `-m 30b` flag selects Qwen3-VL-30B. Use `-m 235b` for the larger model, or a
 Check status and download results:
 
 ```bash
-uv run image-summarisation status
+uv run image-summarization status
 ```
 
 Combine results into a CSV:
 
 ```bash
-uv run image-summarisation analyze -i unsplash-research-dataset-lite-latest/photos.csv000
+uv run image-summarization analyze -i unsplash-research-dataset-lite-latest/photos.csv000
 ```
 
 This produces `results/summaries.csv` with columns for the image URL, original description, photographer, and the generated summary.
@@ -90,7 +90,7 @@ This produces `results/summaries.csv` with columns for the image URL, original d
 Use `--dry-run` to prepare the batch file without uploading:
 
 ```bash
-uv run image-summarisation run -i unsplash-research-dataset-lite-latest/photos.csv000 --dry-run
+uv run image-summarization run -i unsplash-research-dataset-lite-latest/photos.csv000 --dry-run
 ```
 
 ## Conclusion

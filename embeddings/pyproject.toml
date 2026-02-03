@@ -1,0 +1,24 @@
+[project]
+name = "embeddings"
+version = "0.1.0"
+description = "Batch embedding and semantic search via Doubleword Batch API"
+requires-python = ">=3.11"
+dependencies = [
+    "click>=8.1.0",
+    "datasets>=4.5.0",
+    "hnswlib>=0.8.0",
+    "numpy>=1.24.0",
+    "openai>=1.0.0",
+    "requests>=2.31.0",
+    "tqdm>=4.66.0",
+]
+
+[project.scripts]
+embeddings = "src.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

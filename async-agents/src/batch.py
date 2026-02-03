@@ -92,11 +92,6 @@ def wait_for_batch(
     """Poll until batch completes, returning final status."""
     while True:
         batch = client.batches.retrieve(batch_id)
-        counts = batch.request_counts
-
-        click.echo(
-            f"  Status: {batch.status} ({counts.completed}/{counts.total} completed)"
-        )
 
         if batch.status in ("completed", "failed", "cancelled", "expired"):
             return batch

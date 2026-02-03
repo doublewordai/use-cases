@@ -1,7 +1,10 @@
-"""Tool definitions and execution for research agents.
+"""Tool definitions and execution for recursive research agents.
 
 Tools are defined in OpenAI function-calling format and executed locally
 between batch rounds. The model decides which tools to call and when.
+
+Two tools are "deferred" — spawn_agents and write_report — meaning they
+are handled by the orchestrator rather than executed immediately.
 """
 
 import json
@@ -9,66 +12,163 @@ import json
 from .scrape import fetch_url
 from .search import search
 
-TOOL_DEFINITIONS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "web_search",
-            "description": (
-                "Search the web for information on a topic. Returns a list of "
-                "results with titles, URLs, and snippets."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "The search query to execute",
-                    },
-                    "max_results": {
-                        "type": "integer",
-                        "description": "Maximum number of results to return (default 5)",
-                        "default": 5,
-                    },
+# Sentinel value for tools handled by the orchestrator, not here
+DEFERRED = "__DEFERRED__"
+
+_REFERENCE_FINDINGS = {
+    "type": "function",
+    "function": {
+        "name": "reference_findings",
+        "description": (
+            "Reference the findings of another agent that has already "
+            "researched a similar or related topic. Use this instead of "
+            "re-searching a topic that another agent has already covered. "
+            "Check the active_agents list in your context to see what "
+            "topics are already being researched."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "agent_id": {
+                    "type": "string",
+                    "description": "The ID of the agent whose findings to reference",
                 },
-                "required": ["query"],
             },
+            "required": ["agent_id"],
         },
     },
-    {
-        "type": "function",
-        "function": {
-            "name": "fetch_page",
-            "description": (
-                "Fetch and read a web page. Returns the page content as "
-                "markdown text (truncated to 15000 chars). Use this after "
-                "web_search to read promising results in detail."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "url": {
-                        "type": "string",
-                        "description": "The URL of the page to fetch",
-                    },
+}
+
+_WEB_SEARCH = {
+    "type": "function",
+    "function": {
+        "name": "web_search",
+        "description": (
+            "Search the web for information on a topic. Returns a list of "
+            "results with titles, URLs, and snippets."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "The search query to execute",
                 },
-                "required": ["url"],
+                "max_results": {
+                    "type": "integer",
+                    "description": "Maximum number of results to return (default 5)",
+                    "default": 5,
+                },
             },
+            "required": ["query"],
         },
     },
+}
+
+_FETCH_PAGE = {
+    "type": "function",
+    "function": {
+        "name": "fetch_page",
+        "description": (
+            "Fetch and read a web page. Returns the page content as "
+            "markdown text (truncated to 15000 chars). Use this after "
+            "web_search to read promising results in detail."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "description": "The URL of the page to fetch",
+                },
+            },
+            "required": ["url"],
+        },
+    },
+}
+
+_SPAWN_AGENTS = {
+    "type": "function",
+    "function": {
+        "name": "spawn_agents",
+        "description": (
+            "Spawn parallel sub-agents to research different topics "
+            "independently. Each query becomes a separate research agent "
+            "that can search the web, read pages, and even spawn its own "
+            "sub-agents. Returns their combined findings when all complete."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "queries": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "List of research topics/queries, one per sub-agent"
+                    ),
+                },
+            },
+            "required": ["queries"],
+        },
+    },
+}
+
+_WRITE_REPORT = {
+    "type": "function",
+    "function": {
+        "name": "write_report",
+        "description": (
+            "Write the final research report. Call this when you have "
+            "gathered all findings from your sub-agents and any additional "
+            "research, and are ready to produce the final output."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "report": {
+                    "type": "string",
+                    "description": "The complete research report in markdown",
+                },
+            },
+            "required": ["report"],
+        },
+    },
+}
+
+# Root agent gets all tools
+ROOT_TOOLS = [
+    _WEB_SEARCH,
+    _FETCH_PAGE,
+    _SPAWN_AGENTS,
+    _REFERENCE_FINDINGS,
+    _WRITE_REPORT,
 ]
+
+# Sub-agents get all except write_report
+SUB_AGENT_TOOLS = [_WEB_SEARCH, _FETCH_PAGE, _SPAWN_AGENTS, _REFERENCE_FINDINGS]
+
+
+def get_tools_for_agent(is_root: bool) -> list[dict]:
+    """Return the appropriate tool definitions for an agent."""
+    return ROOT_TOOLS if is_root else SUB_AGENT_TOOLS
 
 
 def execute_tool(name: str, arguments: str) -> str:
     """Execute a tool call and return the result as a JSON string.
 
+    Deferred tools (spawn_agents, write_report) return DEFERRED — they are
+    handled by the orchestrator in agent.py, not here.
+
     Args:
-        name: Tool function name (web_search or fetch_page)
+        name: Tool function name
         arguments: JSON string of arguments
 
     Returns:
-        JSON string with the tool result
+        JSON string with the tool result, or DEFERRED sentinel
     """
+    if name in ("spawn_agents", "write_report", "reference_findings"):
+        return DEFERRED
+
     args = json.loads(arguments)
 
     if name == "web_search":
@@ -79,7 +179,6 @@ def execute_tool(name: str, arguments: str) -> str:
         content = fetch_url(args["url"])
         if content is None:
             return json.dumps({"error": f"Failed to fetch {args['url']}"})
-        # Truncate to keep context manageable
         return json.dumps({"url": args["url"], "content": content[:15000]})
 
     return json.dumps({"error": f"Unknown tool: {name}"})

@@ -1,89 +1,110 @@
-# Async Agents: Parallel Tool-Calling Research via Batch API
+# Async Agents: Recursive Tool-Calling Research via Batch API
 
-Multiple research agents run in parallel, each independently deciding what to search and read using tool calling. All agents are batched together — the orchestrator loops: submit batch, poll for results, execute tool calls locally, resubmit agents that need more work. Agents complete independently; some finish in 2 iterations, others in 5.
-
-A 5-agent research task that would cost ~$2.80 in realtime GPT-5.2 calls costs $0.14 with Doubleword's batch Qwen3-235B.
+A single root agent drives the entire research process — breaking a topic into sub-queries, spawning parallel sub-agents, and synthesizing a final report. Sub-agents can recursively spawn their own sub-agents, creating a tree of autonomous researchers. All agents at all depths run in parallel within each batch round, and the model decides everything: what to search, what to read, when to delegate, and when to write the report.
 
 To run this yourself, sign up at [app.doubleword.ai](https://app.doubleword.ai) and generate an API key.
 
 ## How It Works
 
-The key difference from a typical agent: **the model decides what to do via tool calling**, rather than the code hardcoding a search→fetch→analyze pipeline. Each agent receives tools (`web_search`, `fetch_page`) and autonomously decides:
-- What queries to search
-- Which results to read in detail
-- When to search for more information
-- When it has enough to write its findings
+The model controls the entire research workflow via four tools:
+
+| Tool | Description | Execution |
+|------|-------------|-----------|
+| `web_search` | Search the web via Serper API | Immediate |
+| `fetch_page` | Read a web page via Jina Reader | Immediate |
+| `spawn_agents` | Create parallel sub-agents for different research angles | **Deferred** — parent waits for children |
+| `write_report` | Produce the final markdown report | Immediate — signals completion |
+
+The key mechanism is **deferred tool resolution**: when an agent calls `spawn_agents`, it can't get results immediately — the children need multiple batch rounds to complete their own research. So the orchestrator pauses the parent, runs the children through the batch loop, and when all children finish, compiles their findings into the tool result. The parent then resumes with full context of what its sub-agents discovered.
 
 ```
-User provides topic
+User: "Research quantum computing"
         │
         ▼
-Generate N sub-queries (one batch)
+   Root Agent (tools: web_search, fetch_page, spawn_agents, write_report)
         │
-        ▼
-Create N agents, one per sub-query
-Each has: system prompt, tools, user message
+        ├─ calls spawn_agents(["error correction", "hardware", "algorithms"])
+        │       │
+        │       ├─ Sub-agent 0 (error correction)
+        │       │     ├─ web_search → fetch_page → web_search → ...
+        │       │     ├─ spawn_agents(["surface codes", "topological codes"])
+        │       │     │       ├─ Sub-sub-agent → searches, reads, completes
+        │       │     │       └─ Sub-sub-agent → searches, reads, completes
+        │       │     └─ receives children's findings, writes summary
+        │       ├─ Sub-agent 1 → searches, reads, completes
+        │       └─ Sub-agent 2 → searches, reads, completes
         │
-        ▼
-┌──────────────────┐
-│   BATCH LOOP     │◄──────────────────────────┐
-│                  │                            │
-│ Submit all ready │    Agents with tool        │
-│ agents in one    │    results resubmit        │
-│ batch            │                            │
-└────────┬─────────┘                            │
-         │                                      │
-    Poll until complete                         │
-         │                                      │
-    Process responses:                          │
-    ├─ stop → agent done, store findings        │
-    ├─ tool_calls → execute tools locally ──────┘
-    └─ length → agent failed
-         │
-         ▼
-All agents done → Synthesis batch → Report
+        ├─ receives all children's findings as tool result
+        ├─ optionally searches to fill gaps
+        └─ calls write_report("# Final Report\n...")
 ```
 
-Within each batch round, all active agents are submitted together. The model returns either:
-- **Tool calls** — the orchestrator executes them locally (web search via Serper, page fetch via Jina Reader), appends results, and resubmits the agent in the next batch
-- **A final text response** — the agent is done, its findings are stored for synthesis
+### Orchestrator Loop
 
-## JSONL Format with Tools
+All agents at all depths are batched together. A single batch can contain the root's children alongside grandchildren from a different branch:
 
-Each line in the batch file includes tool definitions:
+```
+while root not done:
+    ┌──────────────────┐
+    │  Submit all ready │◄──── parents unblocked by resolved children
+    │  agents in batch  │◄──── new children from spawn_agents
+    └────────┬─────────┘
+             │
+        Poll until complete
+             │
+        Process responses:
+        ├─ stop → agent completed, store findings
+        ├─ tool_calls:
+        │   ├─ web_search/fetch_page → execute immediately
+        │   ├─ spawn_agents → create children, pause parent
+        │   └─ write_report → store report, mark root done
+        └─ length → agent failed
+             │
+        Resolve waiting parents:
+        └─ all children done? → compile findings → unblock parent
+             │
+        Next iteration
+```
+
+### Agent States
+
+```
+pending → in_progress → waiting_for_children → in_progress → completed
+              │                                                   │
+              └─────────────────── failed ◄───────────────────────┘
+```
+
+## JSONL Format
+
+The root agent's initial batch request includes all 4 tools:
 
 ```json
 {
-    "custom_id": "agent-0-iter-0",
+    "custom_id": "root-0-iter-0",
     "method": "POST",
     "url": "/v1/chat/completions",
     "body": {
         "model": "Qwen/Qwen3-VL-235B-A22B-Instruct-FP8",
         "messages": [
-            {"role": "system", "content": "You are a research agent..."},
-            {"role": "user", "content": "Research: quantum error correction advances"}
+            {"role": "system", "content": "You are a lead research agent..."},
+            {"role": "user", "content": "Research the following topic: quantum computing"}
         ],
         "tools": [
             {"type": "function", "function": {"name": "web_search", ...}},
-            {"type": "function", "function": {"name": "fetch_page", ...}}
+            {"type": "function", "function": {"name": "fetch_page", ...}},
+            {"type": "function", "function": {"name": "spawn_agents", ...}},
+            {"type": "function", "function": {"name": "write_report", ...}}
         ],
         "temperature": 0
     }
 }
 ```
 
-After tool execution, the agent's conversation grows with tool call/result pairs:
+Sub-agents get the same tools minus `write_report`. After the root calls `spawn_agents` and children return, the root's messages include:
 
 ```json
-"messages": [
-    {"role": "system", "content": "..."},
-    {"role": "user", "content": "Research: quantum error correction"},
-    {"role": "assistant", "tool_calls": [{"id": "call_abc", "function": {"name": "web_search", "arguments": "{\"query\": \"quantum error correction 2025\"}"}}]},
-    {"role": "tool", "tool_call_id": "call_abc", "content": "{\"results\": [...]}"},
-    {"role": "assistant", "tool_calls": [{"id": "call_def", "function": {"name": "fetch_page", "arguments": "{\"url\": \"https://...\"}"}}]},
-    {"role": "tool", "tool_call_id": "call_def", "content": "Page content..."},
-    {"role": "assistant", "content": "Based on my research, here are the key findings..."}
-]
+{"role": "assistant", "tool_calls": [{"id": "call_abc", "function": {"name": "spawn_agents", "arguments": "{\"queries\": [\"error correction\", \"hardware\"]}"}}]},
+{"role": "tool", "tool_call_id": "call_abc", "content": "{\"sub_agent_results\": [{\"agent_id\": \"sub-1\", \"findings\": \"...\"}, ...]}"}
 ```
 
 ## Running It
@@ -97,13 +118,13 @@ export SERPER_API_KEY="your-serper-key"  # Free at https://serper.dev
 Run a research investigation:
 
 ```bash
-# 5 parallel agents, each using tool calling to research independently
-uv run async-agents run --topic "quantum computing error correction" -m 235b --agents 5
+# Let the root agent decide how to research the topic
+uv run async-agents run --topic "quantum computing error correction" -m 235b
 
-# Fewer agents for a quick test
-uv run async-agents run --topic "rust vs go for web services" -m 30b --agents 3 --max-iterations 5
+# Limit batch rounds for a quicker run
+uv run async-agents run --topic "rust vs go for web services" -m 30b --max-iterations 10
 
-# Dry run to inspect the batch file and tool definitions
+# Dry run to inspect the root agent's batch file and tool definitions
 uv run async-agents run --topic "nuclear fusion progress" --dry-run
 ```
 
@@ -119,35 +140,25 @@ View completed reports:
 uv run async-agents report
 ```
 
-## Cost Comparison
-
-5 parallel research agents, each making 3-5 tool calls:
-
-| Provider | Model | Mode | Avg Cost |
-|----------|-------|------|----------|
-| OpenAI | GPT-5.2 | Realtime | ~$2.80 |
-| OpenAI | GPT-5.2 | Batch | ~$1.40 |
-| Doubleword | Qwen3-235B | Batch (24h) | ~$0.14 |
-| Doubleword | Qwen3-30B | Batch (24h) | ~$0.05 |
-
 ## Architecture
 
 ```
 src/
-├── cli.py      # CLI commands and orchestrator loop
-├── agent.py    # Agent dataclass and orchestrator functions
-├── tools.py    # Tool definitions (JSON Schema) and local execution
-├── batch.py    # Batch API utilities (JSONL creation, upload, polling)
-├── prompts.py  # System prompts for research agents and synthesis
+├── cli.py      # CLI and single orchestrator loop
+├── agent.py    # Agent dataclass, AgentRegistry, tree orchestration
+├── tools.py    # Tool definitions (4 tools) and execution dispatch
+├── batch.py    # Batch API utilities (JSONL, upload, poll, download)
+├── prompts.py  # ROOT_AGENT_SYSTEM and SUB_AGENT_SYSTEM prompts
 ├── search.py   # Serper API wrapper (called by tools.py)
 └── scrape.py   # Jina Reader wrapper (called by tools.py)
 ```
 
-The orchestrator pattern: `agent.py` defines the Agent class and functions for building batch requests, processing responses, and executing tool calls. `cli.py` ties it together in a loop. `tools.py` defines the tool schemas the model receives and dispatches execution to `search.py` and `scrape.py`.
+`agent.py` is the core — it defines the `Agent` dataclass with parent/child relationships and the `AgentRegistry` that manages the tree. The orchestrator functions (`process_responses`, `execute_pending_tools`, `resolve_waiting_parents`) handle the batch loop mechanics. `cli.py` ties it together in a single while loop that runs until the root completes.
 
 ## Limitations
 
-- Tool call execution happens locally between batch rounds, so each round of tool calls adds batch latency (typically 1-5 minutes per round depending on queue depth)
-- Agents may use their iteration budget inefficiently — searching for the same thing twice or reading low-value pages. A more sophisticated orchestrator could prune redundant calls
-- The Serper API free tier provides 2,500 queries/month. With 5 agents making ~3 searches each, one research run uses ~15 queries
+- Each batch round adds latency (typically 1-5 minutes depending on queue depth), and recursive spawning multiplies this — a 3-level deep tree might take 10+ batch rounds
+- The model may over-delegate (spawning sub-agents for trivially simple queries) or under-delegate (doing everything itself). Prompt engineering helps but isn't perfect
+- The Serper API free tier provides 2,500 queries/month. A recursive research run with 5+ agents making 3 searches each can use 20-40 queries per run
 - Jina Reader occasionally fails on JavaScript-heavy pages or paywalls
+- Context length is a practical limit — agents with many tool call rounds accumulate large message histories

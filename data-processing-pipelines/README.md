@@ -14,9 +14,9 @@ This example demonstrates a three-stage data processing pipeline: normalize mess
 
 ## The Experiment
 
-We used the [SEC EDGAR company tickers dataset](https://www.sec.gov/files/company_tickers_exchange.json), a public dataset of ~10,000 publicly traded companies with their names, ticker symbols, CIK numbers, and exchange listings. This data is naturally messy—company names use inconsistent casing ("NVIDIA CORP" vs "Alphabet Inc."), varied abbreviations ("AMAZON COM INC"), and different legal suffix styles. No API key is required—the data is freely available from the SEC. We downloaded 50,000 records and ran them through a three-stage pipeline.
+We used the [SEC EDGAR company tickers dataset](https://www.sec.gov/files/company_tickers_exchange.json), a public dataset of ~10,000 publicly traded companies with their names, ticker symbols, CIK numbers, and exchange listings. This data is naturally messy—company names use inconsistent casing ("NVIDIA CORP" vs "Alphabet Inc."), varied abbreviations ("AMAZON COM INC"), and different legal suffix styles. No API key is required—the data is freely available from the SEC. We downloaded 10,000 records and ran them through a three-stage pipeline.
 
-**Stage 1: Normalize** — Standardize company names (expand abbreviations, fix casing, remove legal suffixes), parse addresses into structured components (street, city, state, zip, country).
+**Stage 1: Normalize** — Standardize company names (expand abbreviations, fix casing, remove legal suffixes), parse addresses into structured data components (street, city, state, zip, country).
 
 **Stage 2: Enrich** — Classify each company into an industry sector based on its name and any available metadata, using a predefined taxonomy of 20 sectors.
 
@@ -120,7 +120,7 @@ export DOUBLEWORD_API_KEY="your-key"
 Download the SEC EDGAR dataset (no API key needed):
 
 ```bash
-uv run data-pipelines prepare --limit 50000
+uv run data-pipelines prepare --limit 10000
 ```
 
 Or use your own CSV file (must have a `name` column):

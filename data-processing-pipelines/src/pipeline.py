@@ -149,25 +149,76 @@ def build_enrich_requests(records: list[dict], model: str) -> list[dict]:
     return requests_data
 
 
+STOP_TOKENS = frozenset(
+    {
+        "inc",
+        "corp",
+        "corporation",
+        "co",
+        "company",
+        "ltd",
+        "limited",
+        "llc",
+        "llp",
+        "lp",
+        "plc",
+        "sa",
+        "nv",
+        "ag",
+        "gmbh",
+        "group",
+        "holdings",
+        "holding",
+        "the",
+        "of",
+        "and",
+        "&",
+        "a",
+        "an",
+    }
+)
+
+
 def generate_dedup_candidates(
     records: list[dict],
     threshold: int = 70,
 ) -> list[tuple]:
-    """Use fuzzy matching to find candidate duplicate pairs above threshold."""
-    candidates = []
+    """Use token-based blocking and fuzzy matching to find candidate duplicates.
+
+    Records are grouped into blocks by shared name tokens (ignoring common
+    corporate suffixes). Only pairs within the same block are compared,
+    reducing complexity from O(n^2) to roughly O(n * b) where b is the
+    average block size.
+    """
     names = [(i, r.get("normalized_name", r["name"])) for i, r in enumerate(records)]
 
-    for i in range(len(names)):
-        for j in range(i + 1, len(names)):
-            score = fuzz.ratio(names[i][1].lower(), names[j][1].lower())
-            if score >= threshold:
-                candidates.append(
-                    (
-                        records[names[i][0]],
-                        records[names[j][0]],
-                        score,
-                    )
+    # Build blocks: map each meaningful token to the set of record indices
+    blocks: dict[str, set[int]] = {}
+    for idx, (i, name) in enumerate(names):
+        tokens = {t for t in re.split(r"[\s.,/&()-]+", name.lower()) if t} - STOP_TOKENS
+        for token in tokens:
+            blocks.setdefault(token, set()).add(idx)
+
+    # Collect unique pairs from all blocks
+    pair_set: set[tuple[int, int]] = set()
+    for members in blocks.values():
+        members_list = sorted(members)
+        for a in range(len(members_list)):
+            for b in range(a + 1, len(members_list)):
+                pair_set.add((members_list[a], members_list[b]))
+
+    # Score only the candidate pairs
+    candidates = []
+    for i, j in pair_set:
+        score = fuzz.ratio(names[i][1].lower(), names[j][1].lower())
+        if score >= threshold:
+            candidates.append(
+                (
+                    records[names[i][0]],
+                    records[names[j][0]],
+                    score,
                 )
+            )
 
     return candidates
 

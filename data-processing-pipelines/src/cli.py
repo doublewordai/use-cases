@@ -266,7 +266,7 @@ def run(input_path: str, output: str, model: str, provider: str, dry_run: bool):
     click.echo("Stage: Deduplicate")
     click.echo(f"{'=' * 60}")
 
-    click.echo("Finding candidate duplicate pairs...")
+    click.echo("Finding candidate duplicate pairs (token-based blocking)...")
     candidates = generate_dedup_candidates(records)
     click.echo(f"Found {len(candidates)} candidate pairs")
 

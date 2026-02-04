@@ -1,41 +1,77 @@
-# Async Agents: Recursive Tool-Calling Research via Batch API
+# Async Agents: Recursive Research via Batch API
 
-A single root agent drives the entire research process — breaking a topic into sub-queries, spawning parallel sub-agents, and synthesizing a final report. Sub-agents can recursively spawn their own sub-agents, creating a tree of autonomous researchers. All agents at all depths run in parallel within each batch round, and the model decides everything: what to search, what to read, when to delegate, and when to write the report.
+A single root agent drives the entire research process — breaking a topic into sub-queries, spawning parallel sub-agents, and synthesizing a final report. Sub-agents can recursively spawn their own sub-agents, creating a tree of autonomous researchers. All agents at all depths run in parallel within each batch round, and the model decides everything: what to read, when to delegate, and when to write the report.
 
 To run this yourself, sign up at [app.doubleword.ai](https://app.doubleword.ai) and generate an API key.
 
+## Design Philosophy: Wide Trees via Search-First
+
+This system is optimized for **batch inference** — where the cost of one request is the same whether you submit 1 or 100 in a batch. The key insight: **make the tree as wide as possible** so each batch round does maximum work in parallel.
+
+The mechanism is **search-first agent creation**: when any agent is created (root or sub-agent), a web search is executed immediately and the results are injected into the agent's initial messages. This means:
+
+- **Round 0**: Root agent already has search results → spawns 5-8 sub-agents immediately
+- **Round 1**: All sub-agents already have search results → read pages and/or spawn their own sub-agents in parallel
+- **Round 2**: Sub-agents complete with findings; grandchildren (if any) are also working
+
+Compare this with a naive approach where each agent wastes its first batch round calling a search tool and waiting for results. That sequential pattern makes trees deep and narrow — the opposite of what batch inference rewards.
+
+**Breadth beats depth**: spawning 5 sub-agents that each complete in 2 rounds is faster than 1 agent doing 10 sequential search-read-search-read cycles, because all 5 sub-agents run in the same batch rounds.
+
 ## How It Works
 
-The model controls the entire research workflow via four tools:
+The model controls the research workflow via five tools:
 
 | Tool | Description | Execution |
 |------|-------------|-----------|
-| `web_search` | Search the web via Serper API | Immediate |
-| `fetch_page` | Read a web page via Jina Reader | Immediate |
-| `spawn_agents` | Create parallel sub-agents for different research angles | **Deferred** — parent waits for children |
-| `write_report` | Produce the final markdown report | Immediate — signals completion |
+| `search` | Search the web for a new angle (initial topic is pre-searched) | Immediate |
+| `read_pages` | Read web pages via Jina Reader | Immediate |
+| `spawn_agents` | Create parallel sub-agents (each gets pre-searched results) | **Deferred** — parent waits |
+| `reference_findings` | Retrieve another agent's completed findings | **Deferred** |
+| `write_report` | Produce the final markdown report | **Deferred** — signals completion |
 
-The key mechanism is **deferred tool resolution**: when an agent calls `spawn_agents`, it can't get results immediately — the children need multiple batch rounds to complete their own research. So the orchestrator pauses the parent, runs the children through the batch loop, and when all children finish, compiles their findings into the tool result. The parent then resumes with full context of what its sub-agents discovered.
+### Search-First Agent Lifecycle
+
+Every agent — root or sub-agent — follows this lifecycle:
+
+```
+Creation:  web search executed immediately, results injected into messages
+    │
+    ▼
+Round 1:   agent sees search results, calls read_pages + spawn_agents in parallel
+    │
+    ▼
+Round 2:   agent sees page content, writes findings (or waits for children)
+```
+
+This contrasts with the old sequential pattern (search → wait → read → wait → act) that took 3-5 rounds per agent.
+
+### Agent Tree Example
 
 ```
 User: "Research quantum computing"
         │
         ▼
-   Root Agent (tools: web_search, fetch_page, spawn_agents, write_report)
+   Root Agent (pre-searched, has results in context)
         │
         ├─ calls spawn_agents(["error correction", "hardware", "algorithms"])
         │       │
-        │       ├─ Sub-agent 0 (error correction)
-        │       │     ├─ web_search → fetch_page → web_search → ...
-        │       │     ├─ spawn_agents(["surface codes", "topological codes"])
-        │       │     │       ├─ Sub-sub-agent → searches, reads, completes
-        │       │     │       └─ Sub-sub-agent → searches, reads, completes
+        │       │  (all children get pre-searched results at creation)
+        │       │
+        │       ├─ Sub-agent 0 (error correction, pre-searched)
+        │       │     ├─ read_pages([url1, url2, url3])  ← first response
+        │       │     └─ writes findings                  ← second response
+        │       │
+        │       ├─ Sub-agent 1 (hardware, pre-searched)
+        │       │     ├─ read_pages + spawn_agents in parallel  ← first response
+        │       │     │       ├─ Sub-sub-agent (pre-searched) → reads, completes
+        │       │     │       └─ Sub-sub-agent (pre-searched) → reads, completes
         │       │     └─ receives children's findings, writes summary
-        │       ├─ Sub-agent 1 → searches, reads, completes
-        │       └─ Sub-agent 2 → searches, reads, completes
+        │       │
+        │       └─ Sub-agent 2 (algorithms, pre-searched)
+        │             └─ read_pages → writes findings
         │
         ├─ receives all children's findings as tool result
-        ├─ optionally searches to fill gaps
         └─ calls write_report("# Final Report\n...")
 ```
 
@@ -47,7 +83,7 @@ All agents at all depths are batched together. A single batch can contain the ro
 while root not done:
     ┌──────────────────┐
     │  Submit all ready │◄──── parents unblocked by resolved children
-    │  agents in batch  │◄──── new children from spawn_agents
+    │  agents in batch  │◄──── new children (pre-searched at creation)
     └────────┬─────────┘
              │
         Poll until complete
@@ -55,8 +91,8 @@ while root not done:
         Process responses:
         ├─ stop → agent completed, store findings
         ├─ tool_calls:
-        │   ├─ web_search/fetch_page → execute immediately
-        │   ├─ spawn_agents → create children, pause parent
+        │   ├─ search/read_pages → execute immediately
+        │   ├─ spawn_agents → search children's topics, create children, pause parent
         │   └─ write_report → store report, mark root done
         └─ length → agent failed
              │
@@ -76,7 +112,7 @@ pending → in_progress → waiting_for_children → in_progress → completed
 
 ## JSONL Format
 
-The root agent's initial batch request includes all 4 tools:
+The root agent's initial batch request includes pre-searched results and all 5 tools:
 
 ```json
 {
@@ -87,12 +123,14 @@ The root agent's initial batch request includes all 4 tools:
         "model": "Qwen/Qwen3-VL-235B-A22B-Instruct-FP8",
         "messages": [
             {"role": "system", "content": "You are a lead research agent..."},
-            {"role": "user", "content": "Research the following topic: quantum computing"}
+            {"role": "user", "content": "Research the following topic: quantum computing"},
+            {"role": "system", "content": "Initial search results for your topic:\n\n1. [Title](url)\n   Snippet...\n\n2. ..."}
         ],
         "tools": [
-            {"type": "function", "function": {"name": "web_search", ...}},
-            {"type": "function", "function": {"name": "fetch_page", ...}},
+            {"type": "function", "function": {"name": "search", ...}},
+            {"type": "function", "function": {"name": "read_pages", ...}},
             {"type": "function", "function": {"name": "spawn_agents", ...}},
+            {"type": "function", "function": {"name": "reference_findings", ...}},
             {"type": "function", "function": {"name": "write_report", ...}}
         ],
         "temperature": 0
@@ -100,12 +138,7 @@ The root agent's initial batch request includes all 4 tools:
 }
 ```
 
-Sub-agents get the same tools minus `write_report`. After the root calls `spawn_agents` and children return, the root's messages include:
-
-```json
-{"role": "assistant", "tool_calls": [{"id": "call_abc", "function": {"name": "spawn_agents", "arguments": "{\"queries\": [\"error correction\", \"hardware\"]}"}}]},
-{"role": "tool", "tool_call_id": "call_abc", "content": "{\"sub_agent_results\": [{\"agent_id\": \"sub-1\", \"findings\": \"...\"}, ...]}"}
-```
+Sub-agents get the same tools minus `write_report`, and also include pre-searched results in their initial messages.
 
 ## Running It
 
@@ -140,25 +173,41 @@ View completed reports:
 uv run async-agents report
 ```
 
+## Cost
+
+Batch inference is cheap. An example "effects of modern lifestyle on health" query using the Qwen 235B model:
+
+| Metric | Value |
+|--------|-------|
+| Agents | 66 |
+| Batch rounds | 21 |
+| Input tokens | ~3.0M |
+| Output tokens | ~113K |
+| **Total cost** | **$0.34** |
+
+A smaller run with the 30B model (8-15 agents, 5-10 rounds) typically costs under $0.05. The search-first approach reduces rounds per agent, which keeps input token accumulation (and therefore cost) low.
+
 ## Architecture
 
 ```
 src/
-├── cli.py      # CLI and single orchestrator loop
-├── agent.py    # Agent dataclass, AgentRegistry, tree orchestration
-├── tools.py    # Tool definitions (4 tools) and execution dispatch
-├── batch.py    # Batch API utilities (JSONL, upload, poll, download)
-├── prompts.py  # ROOT_AGENT_SYSTEM and SUB_AGENT_SYSTEM prompts
-├── search.py   # Serper API wrapper (called by tools.py)
-└── scrape.py   # Jina Reader wrapper (called by tools.py)
+├── cli.py                  # CLI and single orchestrator loop
+├── prompts.py              # ROOT_AGENT_SYSTEM and SUB_AGENT_SYSTEM prompts
+├── tools/
+│   ├── __init__.py         # Tool definitions (5 tools) and execution dispatch
+│   ├── search.py           # Serper API wrapper (called by tools and orchestrator)
+│   └── scrape.py           # Jina Reader wrapper (called by tools)
+└── utils/
+    ├── batch.py            # Batch API utilities (JSONL, upload, poll, download)
+    └── agent.py            # Agent dataclass, AgentRegistry, tree orchestration
 ```
 
-`agent.py` is the core — it defines the `Agent` dataclass with parent/child relationships and the `AgentRegistry` that manages the tree. The orchestrator functions (`process_responses`, `execute_pending_tools`, `resolve_waiting_parents`) handle the batch loop mechanics. `cli.py` ties it together in a single while loop that runs until the root completes.
+`utils/agent.py` is the core — it defines the `Agent` dataclass with parent/child relationships and the `AgentRegistry` that manages the tree. The search-first logic lives in `create_root` and `spawn_children`, which execute web searches at agent creation time. The orchestrator functions (`process_responses`, `execute_pending_tools`, `resolve_waiting_parents`) handle the batch loop mechanics. `cli.py` ties it together in a single while loop that runs until the root completes.
 
 ## Limitations
 
-- Each batch round adds latency (typically 1-5 minutes depending on queue depth), and recursive spawning multiplies this — a 3-level deep tree might take 10+ batch rounds
+- Each batch round adds latency (typically 1-5 minutes depending on queue depth), but the search-first approach minimizes the number of rounds needed
 - The model may over-delegate (spawning sub-agents for trivially simple queries) or under-delegate (doing everything itself). Prompt engineering helps but isn't perfect
-- The Serper API free tier provides 2,500 queries/month. A recursive research run with 5+ agents making 3 searches each can use 20-40 queries per run
+- The Serper API free tier provides 2,500 queries/month. Search-first uses one search per agent at creation time, plus any additional searches the model requests. A run with 10 agents uses ~10-15 searches
 - Jina Reader occasionally fails on JavaScript-heavy pages or paywalls
-- Context length is a practical limit — agents with many tool call rounds accumulate large message histories
+- Context length is a practical limit — agents with many tool call rounds accumulate large message histories, though the search-first approach reduces rounds per agent

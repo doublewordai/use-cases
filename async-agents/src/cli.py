@@ -15,13 +15,13 @@ from pathlib import Path
 
 import click
 
-from .agent import (
+from .utils.agent import (
     AgentRegistry,
     execute_pending_tools,
     process_responses,
     resolve_waiting_parents,
 )
-from .batch import (
+from .utils.batch import (
     count_tokens,
     create_batch,
     create_batch_file,
@@ -97,8 +97,8 @@ def cli():
 )
 @click.option(
     "--max-depth",
-    default=5,
-    help="Max agent tree depth — how many levels of sub-agents (default: 5)",
+    default=3,
+    help="Max agent tree depth — how many levels of sub-agents (default: 3)",
 )
 @click.option(
     "--max-agent-iterations",
@@ -168,6 +168,7 @@ def run(
 
     client, _ = get_client(provider)
     total_tokens = {"input_tokens": 0, "output_tokens": 0}
+    last_tool_counts: dict[str, int] = {}
     iteration = 0
 
     # --- Main orchestrator loop ---
@@ -182,16 +183,23 @@ def run(
                 click.echo("  All agents waiting — possible deadlock, stopping")
             break
 
-        # Print tree at start of each round
-        click.echo()
-        registry.print_tree(iteration=iteration)
-
         # Clear last_tool so it only shows for one round
         for a in registry.agents.values():
             a.last_tool = ""
 
-        # 1. Build and submit batch
+        # 1. Build batch (moves pending → in_progress)
         requests_data = registry.build_batch_requests(ready)
+
+        # Print tool call summary from previous round
+        if iteration > 0 and last_tool_counts:
+            parts = [
+                f"{name}: {count}" for name, count in sorted(last_tool_counts.items())
+            ]
+            click.echo(f"  Tools: {', '.join(parts)}")
+
+        # Print tree after building so submitted agents show as running
+        click.echo()
+        registry.print_tree(iteration=iteration)
         batch_results = _run_batch(
             client,
             provider,
@@ -207,7 +215,7 @@ def run(
         process_responses(registry, batch_results)
 
         # 3. Execute tools (immediate + deferred)
-        execute_pending_tools(registry)
+        last_tool_counts = execute_pending_tools(registry)
 
         # 4. Resolve waiting parents
         resolve_waiting_parents(registry)

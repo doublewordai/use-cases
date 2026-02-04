@@ -75,3 +75,29 @@ def extract_urls(search_results: dict) -> list[str]:
                 seen.add(url)
                 urls.append(url)
     return urls
+
+
+def format_results_for_context(query: str, results: dict) -> str:
+    """Format search results as readable text for injection into agent messages.
+
+    Args:
+        query: The search query that produced these results
+        results: Search results dict with 'results' list
+
+    Returns:
+        Formatted string with numbered results including title, URL, and snippet
+    """
+    items = results.get("results", [])
+    if not items:
+        return f'Search for "{query}" returned no results.'
+
+    lines = [f'Search results for "{query}":\n']
+    for i, item in enumerate(items, 1):
+        title = item.get("title", "Untitled")
+        url = item.get("url", "")
+        snippet = item.get("snippet", "")
+        lines.append(f"{i}. [{title}]({url})")
+        if snippet:
+            lines.append(f"   {snippet}")
+        lines.append("")
+    return "\n".join(lines)

@@ -3,8 +3,9 @@
 Tools are defined in OpenAI function-calling format and executed locally
 between batch rounds. The model decides which tools to call and when.
 
-Two tools are "deferred" — spawn_agents and write_report — meaning they
-are handled by the orchestrator rather than executed immediately.
+Three tools are "deferred" — spawn_agents, write_report, and
+reference_findings — meaning they are handled by the orchestrator
+rather than executed immediately.
 """
 
 import json
@@ -39,13 +40,18 @@ _REFERENCE_FINDINGS = {
     },
 }
 
-_WEB_SEARCH = {
+_SEARCH = {
     "type": "function",
     "function": {
-        "name": "web_search",
+        "name": "search",
         "description": (
-            "Search the web for information on a topic. Returns a list of "
-            "results with titles, URLs, and snippets."
+            "Search the web for a specific angle or follow-up query. "
+            "Your topic was already searched when you were created and "
+            "results are in your context — use this only to explore "
+            "DIFFERENT angles or follow-up questions, not to repeat "
+            "your initial search. Prefer spawning sub-agents over "
+            "calling search multiple times — each sub-agent gets its "
+            "own automatic search and works in parallel."
         ),
         "parameters": {
             "type": "object",
@@ -65,15 +71,16 @@ _WEB_SEARCH = {
     },
 }
 
-_FETCH_PAGES = {
+_READ_PAGES = {
     "type": "function",
     "function": {
-        "name": "fetch_pages",
+        "name": "read_pages",
         "description": (
-            "Fetch and read one or more web pages in parallel. Returns "
-            "each page's content as markdown text (truncated to 15000 "
-            "chars each). Call this with all the URLs you want to read "
-            "at once — they are fetched simultaneously."
+            "Read one or more web pages in parallel. Returns each page's "
+            "content as markdown text (truncated to 15000 chars each). "
+            "Pass ALL the URLs you want to read in a single call — they "
+            "are fetched simultaneously. Use this to read promising URLs "
+            "from your search results."
         ),
         "parameters": {
             "type": "object",
@@ -81,7 +88,7 @@ _FETCH_PAGES = {
                 "urls": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "List of URLs to fetch",
+                    "description": "List of URLs to fetch and read",
                 },
             },
             "required": ["urls"],
@@ -95,9 +102,12 @@ _SPAWN_AGENTS = {
         "name": "spawn_agents",
         "description": (
             "Spawn parallel sub-agents to research different topics "
-            "independently. Each query becomes a separate research agent "
-            "that can search the web, read pages, and even spawn its own "
-            "sub-agents. Returns their combined findings when all complete."
+            "independently. Each sub-agent automatically gets web search "
+            "results for its topic and can then read pages, search for "
+            "new angles, or spawn its own sub-agents. Returns their "
+            "combined findings when all complete. Prefer this over "
+            "calling search multiple times — sub-agents work in parallel "
+            "and are more efficient."
         ),
         "parameters": {
             "type": "object",
@@ -139,15 +149,15 @@ _WRITE_REPORT = {
 
 # Root agent gets all tools
 ROOT_TOOLS = [
-    _WEB_SEARCH,
-    _FETCH_PAGES,
+    _SEARCH,
+    _READ_PAGES,
     _SPAWN_AGENTS,
     _REFERENCE_FINDINGS,
     _WRITE_REPORT,
 ]
 
 # Sub-agents get all except write_report
-SUB_AGENT_TOOLS = [_WEB_SEARCH, _FETCH_PAGES, _SPAWN_AGENTS, _REFERENCE_FINDINGS]
+SUB_AGENT_TOOLS = [_SEARCH, _READ_PAGES, _SPAWN_AGENTS, _REFERENCE_FINDINGS]
 
 
 def get_tools_for_agent(is_root: bool) -> list[dict]:
@@ -158,8 +168,8 @@ def get_tools_for_agent(is_root: bool) -> list[dict]:
 def execute_tool(name: str, arguments: str) -> str:
     """Execute a tool call and return the result as a JSON string.
 
-    Deferred tools (spawn_agents, write_report) return DEFERRED — they are
-    handled by the orchestrator in agent.py, not here.
+    Deferred tools (spawn_agents, write_report, reference_findings) return
+    DEFERRED — they are handled by the orchestrator, not here.
 
     Args:
         name: Tool function name
@@ -173,11 +183,11 @@ def execute_tool(name: str, arguments: str) -> str:
 
     args = json.loads(arguments)
 
-    if name == "web_search":
+    if name == "search":
         result = search(args["query"], max_results=args.get("max_results", 5))
         return json.dumps(result)
 
-    if name == "fetch_pages":
+    if name == "read_pages":
         urls = args.get("urls", [])
         if not urls:
             return json.dumps({"error": "No URLs provided"})

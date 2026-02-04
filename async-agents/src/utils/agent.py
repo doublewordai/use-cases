@@ -17,9 +17,10 @@ from dataclasses import dataclass, field
 
 import click
 
+from ..prompts import ROOT_AGENT_SYSTEM, SUB_AGENT_SYSTEM
+from ..tools import execute_tool, get_tools_for_agent
+from ..tools.search import format_results_for_context, search
 from .batch import extract_message, get_finish_reason
-from .prompts import ROOT_AGENT_SYSTEM, SUB_AGENT_SYSTEM
-from .tools import execute_tool, get_tools_for_agent
 
 
 @dataclass
@@ -65,39 +66,94 @@ class AgentRegistry:
         return id_
 
     def create_root(self, topic: str, model: str) -> Agent:
-        """Create the root agent for a research topic."""
+        """Create the root agent for a research topic.
+
+        Immediately executes a web search for the topic and injects the
+        results into the agent's messages so the first batch inference
+        call already has data to act on.
+        """
+        messages = [
+            {"role": "system", "content": ROOT_AGENT_SYSTEM},
+            {
+                "role": "user",
+                "content": f"Research the following topic and produce a comprehensive report: {topic}",
+            },
+        ]
+
+        # Search-first: execute search at creation time
+        try:
+            results = search(topic)
+            formatted = format_results_for_context(topic, results)
+            messages.append(
+                {
+                    "role": "system",
+                    "content": f"Initial search results for your topic:\n\n{formatted}",
+                }
+            )
+        except Exception as e:
+            click.echo(f"  Pre-search failed: {e}")
+            messages.append(
+                {
+                    "role": "system",
+                    "content": f"Initial search failed ({e}). Use the search tool to find information.",
+                }
+            )
+
         agent = Agent(
             id=self._gen_id("root"),
             model=model,
             is_root=True,
             depth=0,
-            messages=[
-                {"role": "system", "content": ROOT_AGENT_SYSTEM},
-                {
-                    "role": "user",
-                    "content": f"Research the following topic and produce a comprehensive report: {topic}",
-                },
-            ],
+            messages=messages,
         )
         self.agents[agent.id] = agent
         return agent
 
     def spawn_children(self, parent: Agent, queries: list[str]) -> list[Agent]:
-        """Create child agents for the given parent."""
+        """Create child agents for the given parent.
+
+        Immediately executes web searches for all children in parallel
+        and injects results into their messages so each child's first
+        batch inference call already has data to act on.
+        """
+        # Search-first: execute all searches in parallel at creation time
+        search_results: dict[str, dict | None] = {}
+        with ThreadPoolExecutor(max_workers=len(queries)) as executor:
+            futures = {executor.submit(search, query): query for query in queries}
+            for future in as_completed(futures):
+                query = futures[future]
+                try:
+                    search_results[query] = future.result()
+                except Exception as e:
+                    click.echo(f"  Pre-search failed for {query!r}: {e}")
+                    search_results[query] = None
+
         children = []
         for query in queries:
+            # Skip agents whose pre-search failed
+            results = search_results.get(query)
+            if results is None:
+                continue
+
+            formatted = format_results_for_context(query, results)
+            messages = [
+                {"role": "system", "content": SUB_AGENT_SYSTEM},
+                {
+                    "role": "user",
+                    "content": f"Research the following topic thoroughly: {query}",
+                },
+                {
+                    "role": "system",
+                    "content": f"Initial search results for your topic:\n\n{formatted}",
+                },
+            ]
+
             child = Agent(
                 id=self._gen_id("sub"),
                 model=parent.model,
                 parent_id=parent.id,
                 depth=parent.depth + 1,
-                messages=[
-                    {"role": "system", "content": SUB_AGENT_SYSTEM},
-                    {
-                        "role": "user",
-                        "content": f"Research the following topic thoroughly: {query}",
-                    },
-                ],
+                messages=messages,
             )
             self.agents[child.id] = child
             children.append(child)
@@ -191,7 +247,7 @@ class AgentRegistry:
                     "messages": messages,
                     "tools": tools,
                     "temperature": 0,
-                    "max_tokens": 4096,
+                    "max_tokens": 8192 if agent.is_root else 4096,
                 }
             )
             agent.status = "in_progress"
@@ -424,14 +480,21 @@ def process_responses(registry: AgentRegistry, results: dict[str, dict]) -> None
             agent.iteration += 1
 
 
-def execute_pending_tools(registry: AgentRegistry, max_workers: int = 10) -> None:
+def execute_pending_tools(
+    registry: AgentRegistry, max_workers: int = 10
+) -> dict[str, int]:
     """Execute pending tool calls for all agents.
 
-    Immediate tools (web_search, fetch_page) are executed in parallel.
+    Immediate tools (search, read_pages) are executed in parallel.
     Deferred tools are handled specially:
     - spawn_agents: creates children, sets parent to waiting_for_children
     - write_report: stores report, marks agent completed
+
+    Returns:
+        Dict mapping tool name -> call count for this round.
     """
+    tool_counts: dict[str, int] = {}
+
     # Collect agents that have tool_calls in their last message
     agents_with_tools = []
     for agent in registry.agents.values():
@@ -442,7 +505,7 @@ def execute_pending_tools(registry: AgentRegistry, max_workers: int = 10) -> Non
             agents_with_tools.append(agent)
 
     if not agents_with_tools:
-        return
+        return tool_counts
 
     # Separate immediate and deferred tool calls
     immediate_work = []  # (agent, tool_call)
@@ -453,6 +516,7 @@ def execute_pending_tools(registry: AgentRegistry, max_workers: int = 10) -> Non
         for tc in agent.messages[-1]["tool_calls"]:
             name = tc["function"]["name"]
             tool_names.append(name)
+            tool_counts[name] = tool_counts.get(name, 0) + 1
             if name in ("spawn_agents", "write_report", "reference_findings"):
                 deferred_work.append((agent, tc))
             else:
@@ -494,7 +558,7 @@ def execute_pending_tools(registry: AgentRegistry, max_workers: int = 10) -> Non
                         }
                     )
                     # Track successfully fetched URLs
-                    if tool_name == "fetch_pages":
+                    if tool_name == "read_pages":
                         try:
                             parsed = json.loads(result_str)
                             for page in parsed.get("pages", []):
@@ -590,6 +654,8 @@ def execute_pending_tools(registry: AgentRegistry, max_workers: int = 10) -> Non
                 }
             )
             agent.status = "completed"
+
+    return tool_counts
 
 
 def resolve_waiting_parents(registry: AgentRegistry) -> None:

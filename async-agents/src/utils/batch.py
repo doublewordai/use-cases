@@ -8,7 +8,7 @@ from pathlib import Path
 
 import click
 import requests
-from openai import OpenAI
+from openai import APIConnectionError, APITimeoutError, OpenAI
 
 MAX_RETRIES = 3
 RETRY_DELAY = 5  # seconds
@@ -28,6 +28,8 @@ def _with_retries(fn):
                 requests.exceptions.Timeout,
                 ConnectionError,
                 OSError,
+                APITimeoutError,
+                APIConnectionError,
             ) as e:
                 last_exc = e
                 if attempt < MAX_RETRIES - 1:
@@ -117,7 +119,7 @@ def create_batch(client: OpenAI, file_id: str, completion_window: str = "24h") -
 def wait_for_batch(
     client: OpenAI,
     batch_id: str,
-    poll_interval: int = 30,
+    poll_interval: int = 15,
 ) -> dict:
     """Poll until batch completes, returning final status."""
     while True:
@@ -127,7 +129,7 @@ def wait_for_batch(
             try:
                 batch = client.batches.retrieve(batch_id)
                 break
-            except (ConnectionError, OSError) as e:
+            except (ConnectionError, OSError, APITimeoutError, APIConnectionError) as e:
                 last_exc = e
                 if attempt < MAX_RETRIES - 1:
                     time.sleep(RETRY_DELAY * (attempt + 1))

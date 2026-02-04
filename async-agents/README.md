@@ -6,13 +6,13 @@ To run this yourself, sign up at [app.doubleword.ai](https://app.doubleword.ai) 
 
 ## Design Philosophy: Wide Trees via Search-First
 
-This system is optimized for **batch inference** — where the cost of one request is the same whether you submit 1 or 100 in a batch. The key insight: **make the tree as wide as possible** so each batch round does maximum work in parallel.
+This system is optimized for **batch inference** — where the cost of inference is low but time delays can be significant. The key insight: **make the tree as wide as possible** so each batch round does maximum work in parallel.
 
 The mechanism is **search-first agent creation**: when any agent is created (root or sub-agent), a web search is executed immediately and the results are injected into the agent's initial messages. This means:
 
 - **Round 0**: Root agent already has search results → spawns 5-8 sub-agents immediately
 - **Round 1**: All sub-agents already have search results → read pages and/or spawn their own sub-agents in parallel
-- **Round 2**: Sub-agents complete with findings; grandchildren (if any) are also working
+- **Round N**: Sub-agents complete with findings
 
 Compare this with a naive approach where each agent wastes its first batch round calling a search tool and waiting for results. That sequential pattern makes trees deep and narrow — the opposite of what batch inference rewards.
 
@@ -175,7 +175,7 @@ uv run async-agents report
 
 ## Cost
 
-Batch inference is cheap. An example "effects of modern lifestyle on health" query using the Qwen 235B model:
+Batch inference is cheap. An example "effects of modern lifestyle on health" query using the Qwen 235B model (as of 2026-02-04):
 
 | Metric | Value |
 |--------|-------|

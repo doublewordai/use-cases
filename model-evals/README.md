@@ -100,7 +100,7 @@ export OPENAI_API_KEY="your-key"  # optional, for GPT models
 Submit an evaluation batch. The `-n` flag limits the number of questions (e.g., `-n 100` for a quick test):
 
 ```bash
-uv run model-evals run --dataset gsm8k --model 235b
+uv run model-evals run --model 235b
 ```
 
 The `--model` flag accepts aliases (`235b`, `30b`, `gpt5.2`, `gpt5-mini`, `gpt5-nano`) or full model names. Doubleword models use 24-hour batch windows; OpenAI models use their Batch API with similar latency.

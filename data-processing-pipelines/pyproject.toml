@@ -1,0 +1,22 @@
+[project]
+name = "data-processing-pipelines"
+version = "0.1.0"
+description = "Multi-stage data processing pipeline via Doubleword Batch API"
+requires-python = ">=3.11"
+dependencies = [
+    "click>=8.1.0",
+    "openai>=1.0.0",
+    "requests>=2.31.0",
+    "thefuzz>=0.22.0",
+    "tqdm>=4.66.0",
+]
+
+[project.scripts]
+data-pipelines = "src.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

@@ -1,0 +1,21 @@
+[project]
+name = "async-agents"
+version = "0.1.0"
+description = "Multi-round research agent via Doubleword Batch API"
+requires-python = ">=3.11"
+dependencies = [
+    "click>=8.1.0",
+    "openai>=1.0.0",
+    "requests>=2.31.0",
+    "tqdm>=4.66.0",
+]
+
+[project.scripts]
+async-agents = "src.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

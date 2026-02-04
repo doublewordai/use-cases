@@ -9,7 +9,7 @@ are handled by the orchestrator rather than executed immediately.
 
 import json
 
-from .scrape import fetch_url
+from .scrape import fetch_urls
 from .search import search
 
 # Sentinel value for tools handled by the orchestrator, not here
@@ -65,24 +65,26 @@ _WEB_SEARCH = {
     },
 }
 
-_FETCH_PAGE = {
+_FETCH_PAGES = {
     "type": "function",
     "function": {
-        "name": "fetch_page",
+        "name": "fetch_pages",
         "description": (
-            "Fetch and read a web page. Returns the page content as "
-            "markdown text (truncated to 15000 chars). Use this after "
-            "web_search to read promising results in detail."
+            "Fetch and read one or more web pages in parallel. Returns "
+            "each page's content as markdown text (truncated to 15000 "
+            "chars each). Call this with all the URLs you want to read "
+            "at once — they are fetched simultaneously."
         ),
         "parameters": {
             "type": "object",
             "properties": {
-                "url": {
-                    "type": "string",
-                    "description": "The URL of the page to fetch",
+                "urls": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "List of URLs to fetch",
                 },
             },
-            "required": ["url"],
+            "required": ["urls"],
         },
     },
 }
@@ -138,14 +140,14 @@ _WRITE_REPORT = {
 # Root agent gets all tools
 ROOT_TOOLS = [
     _WEB_SEARCH,
-    _FETCH_PAGE,
+    _FETCH_PAGES,
     _SPAWN_AGENTS,
     _REFERENCE_FINDINGS,
     _WRITE_REPORT,
 ]
 
 # Sub-agents get all except write_report
-SUB_AGENT_TOOLS = [_WEB_SEARCH, _FETCH_PAGE, _SPAWN_AGENTS, _REFERENCE_FINDINGS]
+SUB_AGENT_TOOLS = [_WEB_SEARCH, _FETCH_PAGES, _SPAWN_AGENTS, _REFERENCE_FINDINGS]
 
 
 def get_tools_for_agent(is_root: bool) -> list[dict]:
@@ -175,10 +177,18 @@ def execute_tool(name: str, arguments: str) -> str:
         result = search(args["query"], max_results=args.get("max_results", 5))
         return json.dumps(result)
 
-    if name == "fetch_page":
-        content = fetch_url(args["url"])
-        if content is None:
-            return json.dumps({"error": f"Failed to fetch {args['url']}"})
-        return json.dumps({"url": args["url"], "content": content[:15000]})
+    if name == "fetch_pages":
+        urls = args.get("urls", [])
+        if not urls:
+            return json.dumps({"error": "No URLs provided"})
+        fetched = fetch_urls(urls)
+        pages = []
+        for url in urls:
+            content = fetched.get(url)
+            if content:
+                pages.append({"url": url, "content": content[:15000]})
+            else:
+                pages.append({"url": url, "error": f"Failed to fetch {url}"})
+        return json.dumps({"pages": pages})
 
     return json.dumps({"error": f"Unknown tool: {name}"})

@@ -19,7 +19,7 @@ import click
 
 from .batch import extract_message, get_finish_reason
 from .prompts import ROOT_AGENT_SYSTEM, SUB_AGENT_SYSTEM
-from .tools import DEFERRED, execute_tool, get_tools_for_agent
+from .tools import execute_tool, get_tools_for_agent
 
 
 @dataclass
@@ -46,6 +46,8 @@ class Agent:
     depth: int = 0
     is_root: bool = False
     report: str = ""  # Only set on root when write_report is called
+    last_tool: str = ""  # Last tool call name for tree display
+    verified_urls: list[dict] = field(default_factory=list)  # [{url, title}]
 
 
 class AgentRegistry:
@@ -199,6 +201,22 @@ class AgentRegistry:
         """Get all children of a parent agent."""
         return [self.agents[cid] for cid in parent.children_ids if cid in self.agents]
 
+    def collect_verified_urls(self, agent: Agent) -> list[dict]:
+        """Collect all verified URLs from an agent and all its descendants."""
+        seen = set()
+        urls = []
+        stack = [agent]
+        while stack:
+            a = stack.pop()
+            for entry in a.verified_urls:
+                if entry["url"] not in seen:
+                    seen.add(entry["url"])
+                    urls.append(entry)
+            for cid in a.children_ids:
+                if cid in self.agents:
+                    stack.append(self.agents[cid])
+        return urls
+
     def agent_count(self) -> dict[str, int]:
         """Count agents by status."""
         counts: dict[str, int] = {}
@@ -232,11 +250,18 @@ class AgentRegistry:
                     break
             return text[:max_len]
 
+        def _tool_suffix(agent: Agent) -> str:
+            if agent.last_tool:
+                return f"  [{agent.last_tool}]"
+            if agent.status == "waiting_for_children":
+                return "  [waiting...]"
+            return ""
+
         def _print_agent(agent: Agent, prefix: str = "", is_last: bool = True):
             connector = "└─ " if is_last else "├─ "
             icon = STATUS_ICONS.get(agent.status, "?")
             label = _extract_label(agent)
-            click.echo(f"  {prefix}{connector}{icon} {label}")
+            click.echo(f"  {prefix}{connector}{icon} {label}{_tool_suffix(agent)}")
             child_prefix = prefix + ("   " if is_last else "│  ")
             children = [
                 self.agents[cid] for cid in agent.children_ids if cid in self.agents
@@ -268,7 +293,7 @@ class AgentRegistry:
         root = self.get_root()
         icon = STATUS_ICONS.get(root.status, "?")
         label = _extract_label(root, max_len=60)
-        click.echo(f"  {icon} {label}")
+        click.echo(f"  {icon} {label}{_tool_suffix(root)}")
         children = [self.agents[cid] for cid in root.children_ids if cid in self.agents]
         for i, child in enumerate(children):
             _print_agent(child, "", i == len(children) - 1)
@@ -287,6 +312,17 @@ class AgentRegistry:
         if context:
             messages.append({"role": "system", "content": context})
 
+        # Collect all verified URLs from the entire tree
+        all_urls = self.collect_verified_urls(root)
+        sources_block = ""
+        if all_urls:
+            source_lines = [f"- [{e['title']}]({e['url']})" for e in all_urls]
+            sources_block = (
+                "\n\nVERIFIED SOURCES — these URLs were actually fetched and "
+                "read during research. Use ONLY these for citations:\n"
+                + "\n".join(source_lines)
+            )
+
         messages.append(
             {
                 "role": "user",
@@ -295,8 +331,13 @@ class AgentRegistry:
                     "above, write a comprehensive, well-structured research "
                     "report in markdown. Include an executive summary, "
                     "thematic sections with source citations, areas where "
-                    "sources disagree, and areas for further research. "
+                    "sources disagree, and areas for further research.\n\n"
+                    "IMPORTANT: Only cite URLs from the verified sources list "
+                    "below. Do not cite URLs from search snippets or invent "
+                    "URLs. If a finding has no verified URL, state it without "
+                    "a link.\n\n"
                     "Output ONLY the report — no preamble or commentary."
+                    + sources_block
                 ),
             }
         )
@@ -408,16 +449,20 @@ def execute_pending_tools(registry: AgentRegistry, max_workers: int = 10) -> Non
     deferred_work = []  # (agent, tool_call)
 
     for agent in agents_with_tools:
+        tool_names = []
         for tc in agent.messages[-1]["tool_calls"]:
             name = tc["function"]["name"]
+            tool_names.append(name)
             if name in ("spawn_agents", "write_report", "reference_findings"):
                 deferred_work.append((agent, tc))
             else:
                 immediate_work.append((agent, tc))
+        agent.last_tool = ", ".join(tool_names)
 
     # Execute immediate tools in parallel
     if immediate_work:
-        immediate_results: dict[str, str] = {}  # tool_call_id -> result
+        # tool_call_id -> (result_str, tool_name)
+        immediate_results: dict[str, tuple[str, str]] = {}
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = {}
             for agent, tc in immediate_work:
@@ -431,22 +476,35 @@ def execute_pending_tools(registry: AgentRegistry, max_workers: int = 10) -> Non
                     result = future.result()
                 except Exception as e:
                     result = json.dumps({"error": str(e)})
-                immediate_results[tc["id"]] = result
+                immediate_results[tc["id"]] = (result, tc["function"]["name"])
 
-        # Append immediate tool results to agent messages
+        # Append immediate tool results to agent messages and track verified URLs
         for agent in agents_with_tools:
             last_msg = agent.messages[-1]
             if last_msg.get("role") != "assistant" or "tool_calls" not in last_msg:
                 continue
             for tc in last_msg["tool_calls"]:
                 if tc["id"] in immediate_results:
+                    result_str, tool_name = immediate_results[tc["id"]]
                     agent.messages.append(
                         {
                             "role": "tool",
                             "tool_call_id": tc["id"],
-                            "content": immediate_results[tc["id"]],
+                            "content": result_str,
                         }
                     )
+                    # Track successfully fetched URLs
+                    if tool_name == "fetch_pages":
+                        try:
+                            parsed = json.loads(result_str)
+                            for page in parsed.get("pages", []):
+                                if "url" in page and "error" not in page:
+                                    title = page.get("content", "")[:100].split("\n")[0]
+                                    agent.verified_urls.append(
+                                        {"url": page["url"], "title": title}
+                                    )
+                        except (json.JSONDecodeError, TypeError):
+                            pass
 
     # Handle deferred tools
     for agent, tc in deferred_work:
@@ -569,7 +627,18 @@ def resolve_waiting_parents(registry: AgentRegistry) -> None:
 
             # Compile children's findings for this spawn
             findings = []
+            all_sources = []
+            seen_urls = set()
             for child in children:
+                # Collect verified URLs from child and all its descendants
+                child_urls = registry.collect_verified_urls(child)
+                child_source_list = []
+                for entry in child_urls:
+                    child_source_list.append(entry)
+                    if entry["url"] not in seen_urls:
+                        seen_urls.add(entry["url"])
+                        all_sources.append(entry)
+
                 if child.status == "completed" and child.findings:
                     findings.append(
                         {
@@ -578,6 +647,7 @@ def resolve_waiting_parents(registry: AgentRegistry) -> None:
                             if len(child.messages) > 1
                             else "",
                             "findings": child.findings,
+                            "verified_sources": child_source_list,
                         }
                     )
                 else:
@@ -590,7 +660,12 @@ def resolve_waiting_parents(registry: AgentRegistry) -> None:
                         }
                     )
 
-            result_content = json.dumps({"sub_agent_results": findings})
+            result_content = json.dumps(
+                {
+                    "sub_agent_results": findings,
+                    "all_verified_sources": all_sources,
+                }
+            )
             agent.messages.append(
                 {
                     "role": "tool",

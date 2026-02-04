@@ -3,11 +3,39 @@
 import json
 import os
 import time
+from functools import wraps
 from pathlib import Path
 
 import click
 import requests
 from openai import OpenAI
+
+MAX_RETRIES = 3
+RETRY_DELAY = 5  # seconds
+
+
+def _with_retries(fn):
+    """Decorator that retries a function on transient network errors."""
+
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        last_exc = None
+        for attempt in range(MAX_RETRIES):
+            try:
+                return fn(*args, **kwargs)
+            except (
+                requests.exceptions.ConnectionError,
+                requests.exceptions.Timeout,
+                ConnectionError,
+                OSError,
+            ) as e:
+                last_exc = e
+                if attempt < MAX_RETRIES - 1:
+                    time.sleep(RETRY_DELAY * (attempt + 1))
+        raise last_exc
+
+    return wrapper
+
 
 PROVIDERS = {
     "doubleword": {
@@ -67,6 +95,7 @@ def create_batch_file(requests_data: list[dict], output_path: Path) -> Path:
     return output_path
 
 
+@_with_retries
 def upload_batch_file(client: OpenAI, file_path: Path) -> str:
     """Upload batch file and return file ID."""
     with open(file_path, "rb") as f:
@@ -74,6 +103,7 @@ def upload_batch_file(client: OpenAI, file_path: Path) -> str:
     return file.id
 
 
+@_with_retries
 def create_batch(client: OpenAI, file_id: str, completion_window: str = "24h") -> str:
     """Create batch and return batch ID."""
     batch = client.batches.create(
@@ -91,7 +121,18 @@ def wait_for_batch(
 ) -> dict:
     """Poll until batch completes, returning final status."""
     while True:
-        batch = client.batches.retrieve(batch_id)
+        # Retry transient errors during polling
+        last_exc = None
+        for attempt in range(MAX_RETRIES):
+            try:
+                batch = client.batches.retrieve(batch_id)
+                break
+            except (ConnectionError, OSError) as e:
+                last_exc = e
+                if attempt < MAX_RETRIES - 1:
+                    time.sleep(RETRY_DELAY * (attempt + 1))
+        else:
+            raise last_exc
 
         if batch.status in ("completed", "failed", "cancelled", "expired"):
             return batch
@@ -99,6 +140,7 @@ def wait_for_batch(
         time.sleep(poll_interval)
 
 
+@_with_retries
 def download_results(
     output_file_id: str, output_path: Path, provider: str = "doubleword"
 ) -> Path:

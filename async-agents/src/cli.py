@@ -41,7 +41,7 @@ MODELS = {
     "gpt5.2": "gpt-5.2",
 }
 DEFAULT_MODEL = "30b"
-MAX_ITERATIONS = 20
+MAX_ITERATIONS = 25
 
 
 def _run_batch(
@@ -97,8 +97,8 @@ def cli():
 )
 @click.option(
     "--max-depth",
-    default=3,
-    help="Max agent tree depth — how many levels of sub-agents (default: 3)",
+    default=5,
+    help="Max agent tree depth — how many levels of sub-agents (default: 5)",
 )
 @click.option(
     "--max-agent-iterations",
@@ -185,6 +185,10 @@ def run(
         # Print tree at start of each round
         click.echo()
         registry.print_tree(iteration=iteration)
+
+        # Clear last_tool so it only shows for one round
+        for a in registry.agents.values():
+            a.last_tool = ""
 
         # 1. Build and submit batch
         requests_data = registry.build_batch_requests(ready)

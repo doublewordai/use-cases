@@ -152,6 +152,7 @@ def build_enrich_requests(records: list[dict], model: str) -> list[dict]:
 STOP_TOKENS = frozenset(
     {
         "inc",
+        "incorporated",
         "corp",
         "corporation",
         "co",
@@ -182,20 +183,34 @@ STOP_TOKENS = frozenset(
 def generate_dedup_candidates(
     records: list[dict],
     threshold: int = 70,
-) -> list[tuple]:
+    auto_threshold: int = 95,
+) -> tuple[list[tuple], list[tuple]]:
     """Use token-based blocking and fuzzy matching to find candidate duplicates.
 
     Records are grouped into blocks by shared name tokens (ignoring common
     corporate suffixes). Only pairs within the same block are compared,
     reducing complexity from O(n^2) to roughly O(n * b) where b is the
     average block size.
+
+    Returns two lists:
+        - auto_dupes: pairs with score >= auto_threshold, treated as duplicates
+          without LLM verification
+        - candidates: pairs with threshold <= score < auto_threshold, to be
+          verified by the LLM
     """
     names = [(i, r.get("normalized_name", r["name"])) for i, r in enumerate(records)]
 
+    # Strip stop tokens from names for fairer scoring
+    def _clean(name: str) -> tuple[list[str], str]:
+        tokens = [t for t in re.split(r"[\s.,/&()-]+", name.lower()) if t]
+        meaningful = [t for t in tokens if t not in STOP_TOKENS]
+        return meaningful, " ".join(meaningful)
+
+    cleaned = [_clean(name) for _, name in names]
+
     # Build blocks: map each meaningful token to the set of record indices
     blocks: dict[str, set[int]] = {}
-    for idx, (i, name) in enumerate(names):
-        tokens = {t for t in re.split(r"[\s.,/&()-]+", name.lower()) if t} - STOP_TOKENS
+    for idx, (tokens, _) in enumerate(cleaned):
         for token in tokens:
             blocks.setdefault(token, set()).add(idx)
 
@@ -207,11 +222,27 @@ def generate_dedup_candidates(
             for b in range(a + 1, len(members_list)):
                 pair_set.add((members_list[a], members_list[b]))
 
-    # Score only the candidate pairs
+    # Score using weighted combination of fuzzy ratio and token overlap.
+    # This prevents single shared words (e.g. "international") from
+    # inflating scores between unrelated companies.
+    auto_dupes = []
     candidates = []
     for i, j in pair_set:
-        score = fuzz.ratio(names[i][1].lower(), names[j][1].lower())
-        if score >= threshold:
+        fuzzy = fuzz.ratio(cleaned[i][1], cleaned[j][1])
+        tokens_i = set(cleaned[i][0])
+        tokens_j = set(cleaned[j][0])
+        union = tokens_i | tokens_j
+        jaccard = len(tokens_i & tokens_j) / len(union) if union else 0.0
+        score = int(fuzzy * 0.6 + jaccard * 100 * 0.4)
+        if score >= auto_threshold:
+            auto_dupes.append(
+                (
+                    records[names[i][0]],
+                    records[names[j][0]],
+                    score,
+                )
+            )
+        elif score >= threshold:
             candidates.append(
                 (
                     records[names[i][0]],
@@ -220,7 +251,7 @@ def generate_dedup_candidates(
                 )
             )
 
-    return candidates
+    return auto_dupes, candidates
 
 
 def build_dedup_requests(pairs: list[tuple], model: str) -> list[dict]:

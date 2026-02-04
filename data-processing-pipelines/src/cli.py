@@ -1,6 +1,7 @@
 """CLI for running data processing pipelines via batch API."""
 
 import json
+import math
 from collections import Counter
 from pathlib import Path
 
@@ -80,6 +81,62 @@ def _run_stage(
     click.echo(f"Results saved: {results_file}")
 
     return parse_results(results_file)
+
+
+BATCH_CHUNK_SIZE = 10_000
+
+
+def _run_stage_chunked(
+    client,
+    provider: str,
+    requests_data: list[dict],
+    stage_name: str,
+    output_dir: Path,
+    model_slug: str,
+) -> dict[str, dict]:
+    """Run a stage in chunks of BATCH_CHUNK_SIZE, merging all results."""
+    total = len(requests_data)
+    num_chunks = math.ceil(total / BATCH_CHUNK_SIZE)
+
+    click.echo(f"\n{'=' * 60}")
+    click.echo(f"Stage: {stage_name} ({total} requests in {num_chunks} batch(es))")
+    click.echo(f"{'=' * 60}")
+
+    all_results = {}
+    for chunk_idx in range(num_chunks):
+        start = chunk_idx * BATCH_CHUNK_SIZE
+        end = min(start + BATCH_CHUNK_SIZE, total)
+        chunk = requests_data[start:end]
+
+        chunk_label = f"{stage_name}_chunk{chunk_idx}"
+        click.echo(f"\n  Batch {chunk_idx + 1}/{num_chunks} ({len(chunk)} requests)")
+
+        batch_file = output_dir / f"{chunk_label}_{model_slug}_input.jsonl"
+        create_batch_file(chunk, batch_file)
+
+        click.echo("  Uploading batch file...")
+        file_id = upload_batch_file(client, batch_file)
+        click.echo(f"    File ID: {file_id}")
+
+        click.echo("  Creating batch...")
+        batch_id = create_batch(client, file_id)
+        click.echo(f"    Batch ID: {batch_id}")
+
+        click.echo("  Waiting for batch to complete...")
+        batch = wait_for_batch(client, batch_id)
+
+        if batch.status != "completed":
+            raise click.ClickException(
+                f"Batch {chunk_idx + 1}/{num_chunks} failed with status: {batch.status}"
+            )
+
+        results_file = output_dir / f"{chunk_label}_{model_slug}_output.jsonl"
+        download_results(batch.output_file_id, results_file, provider)
+        click.echo(f"  Results saved: {results_file}")
+
+        all_results.update(parse_results(results_file))
+
+    return all_results
 
 
 @click.group()
@@ -187,10 +244,7 @@ def run(input_path: str, output: str, model: str, provider: str, dry_run: bool):
 
     if dry_run:
         click.echo(f"\nDry run - created {len(norm_requests)} normalize requests")
-        enrich_requests = build_enrich_requests(records, model_id)
-        enrich_file = output_dir / f"enrich_{model_slug}_input.jsonl"
-        create_batch_file(enrich_requests, enrich_file)
-        click.echo(f"Dry run - created {len(enrich_requests)} enrich requests")
+        click.echo("(Dedup and enrich batch files are generated at runtime.)")
         click.echo("Batch files created but not submitted.")
         return
 
@@ -230,50 +284,41 @@ def run(input_path: str, output: str, model: str, provider: str, dry_run: bool):
         json.dump(records, f, indent=2)
     click.echo(f"Normalized records saved to {norm_output}")
 
-    # Stage 2: Enrich
-    enrich_requests = build_enrich_requests(records, model_id)
-    enrich_results = _run_stage(
-        client,
-        provider,
-        enrich_requests,
-        "enrich",
-        output_dir,
-        model_slug,
-    )
-    tokens = count_tokens(enrich_results)
-    total_tokens["input_tokens"] += tokens["input_tokens"]
-    total_tokens["output_tokens"] += tokens["output_tokens"]
-
-    for record in records:
-        key = f"enrich-{record['id']}"
-        if key in enrich_results:
-            content = _extract_content(enrich_results[key])
-            if content:
-                enrich_data = parse_json_response(content)
-                if enrich_data:
-                    record["industry"] = enrich_data.get("industry", "")
-                    record["sub_industry"] = enrich_data.get("sub_industry", "")
-                    record["size"] = enrich_data.get("size", "")
-                    record["industry_confidence"] = enrich_data.get("confidence", "")
-
-    enrich_output = output_dir / "stage2_enriched.json"
-    with open(enrich_output, "w") as f:
-        json.dump(records, f, indent=2)
-    click.echo(f"Enriched records saved to {enrich_output}")
-
-    # Stage 3: Deduplicate
+    # Stage 2: Deduplicate (before enrichment to avoid enriching duplicates)
     click.echo(f"\n{'=' * 60}")
     click.echo("Stage: Deduplicate")
     click.echo(f"{'=' * 60}")
 
-    click.echo("Finding candidate duplicate pairs (token-based blocking)...")
-    candidates = generate_dedup_candidates(records)
-    click.echo(f"Found {len(candidates)} candidate pairs")
+    click.echo(
+        "Finding candidate duplicate pairs (token blocking + fuzzy/Jaccard scoring)..."
+    )
+    auto_dupes, candidates = generate_dedup_candidates(records)
+    click.echo(
+        f"Found {len(auto_dupes)} auto-confirmed duplicates (score >= 95), "
+        f"{len(candidates)} candidates for LLM verification"
+    )
 
+    # Auto-confirmed duplicates (high fuzzy score, no LLM needed)
     duplicates = []
+    duplicate_ids = set()
+    for rec_a, rec_b, score in auto_dupes:
+        duplicates.append(
+            {
+                "record_a": rec_a["id"],
+                "record_b": rec_b["id"],
+                "name_a": rec_a.get("normalized_name", rec_a["name"]),
+                "name_b": rec_b.get("normalized_name", rec_b["name"]),
+                "fuzzy_score": score,
+                "confidence": "auto",
+                "relationship": "exact_or_near_match",
+            }
+        )
+        duplicate_ids.add(rec_b["id"])
+
+    # LLM-verified duplicates (ambiguous fuzzy score, submitted in chunks)
     if candidates:
         dedup_requests = build_dedup_requests(candidates, model_id)
-        dedup_results = _run_stage(
+        dedup_results = _run_stage_chunked(
             client,
             provider,
             dedup_requests,
@@ -303,17 +348,54 @@ def run(input_path: str, output: str, model: str, provider: str, dry_run: bool):
                                 "relationship": dedup_data.get("relationship", ""),
                             }
                         )
+                        duplicate_ids.add(rec_b["id"])
 
-    dedup_output = output_dir / "stage3_duplicates.json"
+    dedup_output = output_dir / "stage2_duplicates.json"
     with open(dedup_output, "w") as f:
         json.dump(duplicates, f, indent=2)
     click.echo(f"Found {len(duplicates)} confirmed duplicates -> {dedup_output}")
+
+    # Remove duplicates before enrichment
+    unique_records = [r for r in records if r["id"] not in duplicate_ids]
+    click.echo(f"Deduplicated {len(records)} -> {len(unique_records)} unique records")
+
+    # Stage 3: Enrich (only unique records)
+    enrich_requests = build_enrich_requests(unique_records, model_id)
+    enrich_results = _run_stage(
+        client,
+        provider,
+        enrich_requests,
+        "enrich",
+        output_dir,
+        model_slug,
+    )
+    tokens = count_tokens(enrich_results)
+    total_tokens["input_tokens"] += tokens["input_tokens"]
+    total_tokens["output_tokens"] += tokens["output_tokens"]
+
+    for record in unique_records:
+        key = f"enrich-{record['id']}"
+        if key in enrich_results:
+            content = _extract_content(enrich_results[key])
+            if content:
+                enrich_data = parse_json_response(content)
+                if enrich_data:
+                    record["industry"] = enrich_data.get("industry", "")
+                    record["sub_industry"] = enrich_data.get("sub_industry", "")
+                    record["size"] = enrich_data.get("size", "")
+                    record["industry_confidence"] = enrich_data.get("confidence", "")
+
+    enrich_output = output_dir / "stage3_enriched.json"
+    with open(enrich_output, "w") as f:
+        json.dump(unique_records, f, indent=2)
+    click.echo(f"Enriched records saved to {enrich_output}")
 
     # Summary
     summary = {
         "model": model_id,
         "provider": provider,
         "num_records": len(records),
+        "unique_records": len(unique_records),
         "tokens": total_tokens,
         "duplicates_found": len(duplicates),
     }
@@ -349,7 +431,7 @@ def analyze(output: str):
     """Analyze pipeline results and print summary statistics."""
     output_dir = Path(output)
 
-    enriched_path = output_dir / "stage2_enriched.json"
+    enriched_path = output_dir / "stage3_enriched.json"
     if enriched_path.exists():
         with open(enriched_path) as f:
             records = json.load(f)
@@ -384,7 +466,7 @@ def analyze(output: str):
     else:
         click.echo(f"No enriched records found at {enriched_path}")
 
-    dedup_path = output_dir / "stage3_duplicates.json"
+    dedup_path = output_dir / "stage2_duplicates.json"
     if dedup_path.exists():
         with open(dedup_path) as f:
             duplicates = json.load(f)

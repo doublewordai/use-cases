@@ -1,6 +1,6 @@
 # Embeddings at Scale: Semantic Search for 70% Less Than OpenAI
 
-Vector embeddings power semantic search, RAG pipelines, and recommendation systems, but generating them at scale gets expensive. We embedded a document corpus using Doubleword's batch API for $0.03, compared to $0.21 on OpenAI's realtime API or $0.10 on OpenAI's batch API. Since embedding is a single-batch operation with no sequential dependencies, the 24-hour SLA is fine here, and the cost savings are substantial.
+Vector embeddings power semantic search, RAG pipelines, and recommendation systems, but generating them at scale gets expensive. We embedded a document corpus using Doubleword's batch API for \$0.03, compared to \$0.21 on OpenAI's realtime API or \$0.10 on OpenAI's batch API. Since embedding is a single-batch operation with no sequential dependencies, the 24-hour SLA is fine here, and the cost savings are substantial.
 
 To run this yourself, sign up at [app.doubleword.ai](https://app.doubleword.ai) and generate an API key.
 
@@ -14,19 +14,19 @@ Here's what our embedding run actually cost (1,608,708 input tokens):
 
 | Provider | Model | Input Rate | Total Cost |
 |----------|-------|------------|------------|
-| Doubleword (24hr SLA) | Qwen3 Embedding 8B | $0.02/MTok | **$0.03** |
-| OpenAI (batch) | text-embedding-3-large | $0.065/MTok | **$0.10** |
-| Voyage AI | voyage-3-large | $0.12/MTok | **$0.19** |
-| OpenAI (realtime) | text-embedding-3-large | $0.13/MTok | **$0.21** |
+| Doubleword (24hr SLA) | Qwen3 Embedding 8B | \$0.02/MTok | **\$0.03** |
+| OpenAI (batch) | text-embedding-3-large | \$0.065/MTok | **\$0.10** |
+| Voyage AI | voyage-3-large | \$0.12/MTok | **\$0.19** |
+| OpenAI (realtime) | text-embedding-3-large | \$0.13/MTok | **\$0.21** |
 
 Pricing from [OpenAI](https://platform.openai.com/docs/pricing) and [Voyage AI](https://docs.voyageai.com/docs/pricing).
 
 At scale, these differences compound. Embedding 10 million documents at 200 tokens each (2B tokens total):
-- Doubleword: **$40**
-- OpenAI batch: **$130**
-- OpenAI realtime: **$260**
+- Doubleword: **\$40**
+- OpenAI batch: **\$130**
+- OpenAI realtime: **\$260**
 
-If you're iterating on chunking strategies (and you should be, since chunking matters more than model choice for RAG quality), that's the difference between $40 and $260 per iteration.
+If you're iterating on chunking strategies (and you should be, since chunking matters more than model choice for RAG quality), that's the difference between \$40 and \$260 per iteration.
 
 ## The Experiment
 

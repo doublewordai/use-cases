@@ -1,4 +1,4 @@
-# Async Agents: Deep Research in a Day for $0.34
+# Async Agents: Deep Research in a Day for \$0.34
 
 Agentic workflows require many rounds of inference. A single research agent might call tools 10-20 times before producing a final report; a tree of agents can easily require hundreds of LLM calls. At real-time API rates, this gets expensive fast. At batch rates with a 24-hour SLA, it's cheap but slow: each batch round adds latency, and a deep agent tree might take weeks to complete.
 
@@ -14,9 +14,9 @@ The cost difference is equally dramatic. Here's what that daffodils query actual
 
 | Provider | Model | ELO | Input Rate | Output Rate | Total Cost |
 |----------|-------|-----|------------|-------------|------------|
-| Doubleword (1hr SLA) | Qwen 235B | 1423 | $0.15/MTok | $0.55/MTok | **$0.34** |
-| OpenAI | GPT-4o | 1442 | $2.50/MTok | $10.00/MTok | **$5.81** |
-| Anthropic | Claude Sonnet 4.5 | 1450 | $3.00/MTok | $15.00/MTok | **$7.25** |
+| Doubleword (1hr SLA) | Qwen 235B | 1423 | \$0.15/MTok | \$0.55/MTok | **\$0.34** |
+| OpenAI | GPT-4o | 1442 | \$2.50/MTok | \$10.00/MTok | **\$5.81** |
+| Anthropic | Claude Sonnet 4.5 | 1450 | \$3.00/MTok | \$15.00/MTok | **\$7.25** |
 
 Qwen 235B scores 1423 on the [LMArena leaderboard](https://kearai.com/leaderboard/chat), comparable to GPT-4o (1442) and Claude Sonnet 4.5 (1450). The capability is similar; the cost is 16-20x lower.
 
@@ -157,10 +157,10 @@ Here's what actual research runs cost with the 235B model:
 
 | Query | Agents | Rounds | Input Tokens | Output Tokens | Doubleword (1hr) | OpenAI GPT-4o | Claude Sonnet 4.5 |
 |-------|--------|--------|--------------|---------------|------------------|---------------|-------------------|
-| Daffodil popularity history | 47 | 25 | 1.95M | 93K | **$0.34** | $5.81 | $7.25 |
-| Effects of modern lifestyle on health | 66 | 21 | 3.0M | 113K | **$0.51** | $8.63 | $10.70 |
+| Daffodil popularity history | 47 | 25 | 1.95M | 93K | **\$0.34** | \$5.81 | \$7.25 |
+| Effects of modern lifestyle on health | 66 | 21 | 3.0M | 113K | **\$0.51** | \$8.63 | \$10.70 |
 
-The search-first approach reduces rounds per agent, which keeps input token accumulation (and therefore cost) low. A smaller run with the 30B model (8-15 agents, 5-10 rounds) typically costs under $0.05.
+The search-first approach reduces rounds per agent, which keeps input token accumulation (and therefore cost) low. A smaller run with the 30B model (8-15 agents, 5-10 rounds) typically costs under \$0.05.
 
 ## JSONL Format
 

@@ -1,4 +1,4 @@
-# Dataset Compilation: 188 Companies for $1
+# Dataset Compilation: 188 Companies for \$1
 
 We built a comprehensive dataset of datacenter networking hardware companies using LLM-powered search and filtering. The pipeline recursively expands a topic description into diverse search queries, extracts structured data with batch inference, then validates each candidate with a second LLM pass. The final dataset contains 188 unique companies with 100% recall against the Gartner Magic Quadrant.
 
@@ -8,7 +8,7 @@ To run this yourself, sign up at [app.doubleword.ai](https://app.doubleword.ai) 
 
 Suppose you're doing competitive analysis for a networking hardware company, or you're an investor trying to map the datacenter infrastructure landscape, or you're identifying acquisition targets in a fragmented market. You need a comprehensive list of companies in the space, not just the obvious names that show up on the first page of Google.
 
-The traditional options are expensive. You can pay a junior analyst to spend a few days searching and compiling a spreadsheet, which typically costs $500-800 and produces maybe 50 companies before they run out of search variations to try. Or you can subscribe to a commercial database like Crunchbase or PitchBook, which costs thousands per year and tends to be strong on VC-backed startups but weak on established players, international companies, and the long tail of smaller vendors.
+The traditional options are expensive. You can pay a junior analyst to spend a few days searching and compiling a spreadsheet, which typically costs \$500-800 and produces maybe 50 companies before they run out of search variations to try. Or you can subscribe to a commercial database like Crunchbase or PitchBook, which costs thousands per year and tends to be strong on VC-backed startups but weak on established players, international companies, and the long tail of smaller vendors.
 
 The approach here uses LLMs for both query generation and filtering. We start with a topic description and recursively expand it into diverse search queries: the LLM takes "datacenter networking hardware companies" and generates sub-queries that approach it from different angles, and each of those expands again until we have 100+ specific queries covering geographic regions, product categories, business models, and recent events. Each query surfaces candidates the others miss.
 
@@ -56,24 +56,24 @@ We found all 11 vendors and the filtering step classified each one correctly, gi
 
 | Step | API | Requests | Cost |
 |------|-----|----------|------|
-| Generate queries | Doubleword (real-time) | ~50 | $0.10 |
-| Initial search | [Serper](https://serper.dev/pricing) | 125 | $0.13 |
-| Extract companies | Doubleword (batch) | 1,216 | $0.40 |
-| LLM deduplication | Doubleword (batch) | 7 | $0.02 |
-| Validation search | Serper | 285 | $0.29 |
-| Validation classify | Doubleword (batch) | 285 | $0.09 |
-| Final deduplication | Doubleword (batch) | 3 | $0.01 |
-| **Total** | | | **~$1.05** |
+| Generate queries | Doubleword (real-time) | ~50 | \$0.10 |
+| Initial search | [Serper](https://serper.dev/pricing) | 125 | \$0.13 |
+| Extract companies | Doubleword (batch) | 1,216 | \$0.40 |
+| LLM deduplication | Doubleword (batch) | 7 | \$0.02 |
+| Validation search | Serper | 285 | \$0.29 |
+| Validation classify | Doubleword (batch) | 285 | \$0.09 |
+| Final deduplication | Doubleword (batch) | 3 | \$0.01 |
+| **Total** | | | **~\$1.05** |
 
-Doubleword batch pricing is 50% off standard rates ([pricing](https://doubleword.ai/pricing)). Serper charges $0.001 per search.
+Doubleword batch pricing is 50% off standard rates ([pricing](https://doubleword.ai/pricing)). Serper charges \$0.001 per search.
 
 For comparison:
 
 | Approach | Cost | Coverage |
 |----------|------|----------|
-| Junior analyst (2 days) | $500-800 | Finds the obvious names |
-| Crunchbase subscription | $5,000+/year | Good for VC-backed startups, weak on established players |
-| **LLM + search (this approach)** | **~$1** | 188 validated companies, 100% Gartner recall |
+| Junior analyst (2 days) | \$500-800 | Finds the obvious names |
+| Crunchbase subscription | \$5,000+/year | Good for VC-backed startups, weak on established players |
+| **LLM + search (this approach)** | **~\$1** | 188 validated companies, 100% Gartner recall |
 
 The cost difference is roughly 500x. You can run hundreds of queries, validate every candidate, and iterate on the pipeline freely.
 
@@ -198,4 +198,4 @@ The important thing is defining a clear filter criterion that separates true pos
 
 The pipeline runs LLMs at two stages. First, during query expansion and extraction: we turn a topic description into 125 diverse search queries, then extract structured company data from 1,200+ search results. Second, during filtering: we run a fresh web search for each candidate and ask the LLM to classify whether it actually matches the topic. This second pass cut 62 false positives (data center operators, cloud providers, companies with insufficient web presence) while keeping all 11 vendors from the Gartner Magic Quadrant.
 
-Batch inference makes this practical. Processing 1,500+ LLM requests at real-time API rates would cost several dollars and take hours. Batch pricing brings the total under $1, and results come back in minutes. At that price point, you can run the pipeline monthly to catch new entrants, or adapt it to adjacent markets.
+Batch inference makes this practical. Processing 1,500+ LLM requests at real-time API rates would cost several dollars and take hours. Batch pricing brings the total under \$1, and results come back in minutes. At that price point, you can run the pipeline monthly to catch new entrants, or adapt it to adjacent markets.

@@ -1,4 +1,4 @@
-# Extract Receipt Data for $0.00019 per Document
+# Extract Receipt Data for \$0.00019 per Document
 
 **Qwen3-30B beats GPT-5.2 at 1/12th the cost**
 
@@ -12,11 +12,11 @@ We extracted three fields from each receipt (vendor name, date, total amount) an
 
 | Model | Overall | Vendor Name | Date | Total | Cost (626 receipts) |
 |-------|---------|-------------|------|-------|---------------------|
-| **Qwen3-VL-235B** | **93.0%** | **87.7%** | **92.5%** | **98.9%** | $0.58 |
-| Qwen3-VL-30B | 90.6% | 86.1% | 90.7% | 94.9% | $0.12 |
-| GPT-5-mini | 87.7% | 77.8% | 88.0% | 97.4% | $0.15 |
-| GPT-5.2 | 86.9% | 77.8% | 86.2% | 96.8% | $1.51 |
-| GPT-5-nano | 84.3% | 73.1% | 84.3% | 95.5% | $0.23 |
+| **Qwen3-VL-235B** | **93.0%** | **87.7%** | **92.5%** | **98.9%** | \$0.58 |
+| Qwen3-VL-30B | 90.6% | 86.1% | 90.7% | 94.9% | \$0.12 |
+| GPT-5-mini | 87.7% | 77.8% | 88.0% | 97.4% | \$0.15 |
+| GPT-5.2 | 86.9% | 77.8% | 86.2% | 96.8% | \$1.51 |
+| GPT-5-nano | 84.3% | 73.1% | 84.3% | 95.5% | \$0.23 |
 
 The Qwen models pull ahead on vendor name extraction, which is the hardest field. Qwen3-30B gets 86.1% of vendor names correct versus GPT-5-mini's 77.8%, an 8.3 percentage point gap. This matters because vendor names are where real-world extraction typically fails: receipts display multiple business names (franchise plus operator, building plus tenant), and the model needs to pick the right one.
 
@@ -32,11 +32,11 @@ The output token differences are also notable: GPT-5-nano generates 833K tokens 
 
 | Model | Input Tokens | Output Tokens | Batch Cost | Per Receipt |
 |-------|--------------|---------------|------------|-------------|
-| **Qwen3-VL-30B** | 2.14M | 59K | **$0.12** | **$0.00019** |
-| GPT-5-mini | 1.00M | 257K | $0.15 | $0.00024 |
-| GPT-5-nano | 1.23M | 833K | $0.23 | $0.00037 |
-| Qwen3-VL-235B | 2.14M | 56K | $0.58 | $0.00093 |
-| GPT-5.2 | 1.00M | 51K | $1.51 | $0.00242 |
+| **Qwen3-VL-30B** | 2.14M | 59K | **\$0.12** | **\$0.00019** |
+| GPT-5-mini | 1.00M | 257K | \$0.15 | \$0.00024 |
+| GPT-5-nano | 1.23M | 833K | \$0.23 | \$0.00037 |
+| Qwen3-VL-235B | 2.14M | 56K | \$0.58 | \$0.00093 |
+| GPT-5.2 | 1.00M | 51K | \$1.51 | \$0.00242 |
 
 We ran the GPT models via OpenAI's real-time API (their batch API doesn't support 1-hour SLAs or partial result downloads). For a fair cost comparison, we quote OpenAI's batch pricing throughout.
 
@@ -46,8 +46,8 @@ Prices: [OpenAI pricing](https://platform.openai.com/docs/pricing), [Doubleword 
 
 | Need | Model | Accuracy | Cost/Receipt |
 |------|-------|----------|--------------|
-| Best value | Qwen3-VL-30B | 90.6% | $0.00019 |
-| Maximum accuracy | Qwen3-VL-235B | 93.0% | $0.00093 |
+| Best value | Qwen3-VL-30B | 90.6% | \$0.00019 |
+| Maximum accuracy | Qwen3-VL-235B | 93.0% | \$0.00093 |
 
 The GPT models don't make a compelling case for this task. GPT-5-mini costs more than Qwen3-30B with lower accuracy. GPT-5.2 costs 12x more than Qwen3-30B with even lower accuracy. GPT-5-nano is the cheapest GPT option but has the worst accuracy by a significant margin.
 
@@ -126,7 +126,7 @@ Note: OpenAI's real-time API costs 2x their batch API rates. The costs in our co
 
 For document extraction at scale, the Qwen models via Doubleword's Batch API offer the best combination of accuracy and cost:
 
-- **Qwen3-VL-30B** delivers 90.6% accuracy at $0.00019 per document, beating GPT-5.2 (86.9%) at 1/12th the price
-- **Qwen3-VL-235B** reaches 93.0% accuracy at $0.00093 per document for applications where accuracy is critical
+- **Qwen3-VL-30B** delivers 90.6% accuracy at \$0.00019 per document, beating GPT-5.2 (86.9%) at 1/12th the price
+- **Qwen3-VL-235B** reaches 93.0% accuracy at \$0.00093 per document for applications where accuracy is critical
 
-The batch API makes this economical at any scale. Processing 626 receipts cost $0.12 with the 30B model. Scale linearly from there: 10,000 documents for ~$2, 100,000 for ~$20.
+The batch API makes this economical at any scale. Processing 626 receipts cost \$0.12 with the 30B model. Scale linearly from there: 10,000 documents for ~\$2, 100,000 for ~\$20.

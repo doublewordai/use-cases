@@ -1,8 +1,8 @@
-# Data Processing Pipelines: Cleaning 50,000 Records in 3 Hours for $0.80
+# Data Processing Pipelines: Cleaning 50,000 Records in 3 Hours for \$0.80
 
 Large-scale data cleaning and enrichment has always been tedious: write regex for every edge case, build lookup tables, or review hundreds of records manually. LLM-powered batch processing offers a third option: describe what you want in plain English and let the model handle the long tail of messy data. The constraint has been latency. A three-stage pipeline (normalize, enrich, deduplicate) with a 24-hour SLA per batch takes three days minimum. With Doubleword's 1-hour SLA, the same pipeline completes in 3 hours.
 
-We cleaned and standardized 50,000 company records from a public dataset, fixing inconsistent names, normalizing addresses, and extracting structured fields, for $0.80 on Doubleword's batch API versus $27 on GPT-4o realtime.
+We cleaned and standardized 50,000 company records from a public dataset, fixing inconsistent names, normalizing addresses, and extracting structured fields, for \$0.80 on Doubleword's batch API versus \$27 on GPT-4o realtime.
 
 To run this yourself, sign up at [app.doubleword.ai](https://app.doubleword.ai) and generate an API key.
 
@@ -18,10 +18,10 @@ Here's what our 50,000-record run actually cost (3,932,240 input tokens, 1,756,7
 
 | Provider | Model | ELO | Input Rate | Output Rate | Total Cost |
 |----------|-------|-----|------------|-------------|------------|
-| Doubleword (1hr SLA) | Qwen 30B | 1382 | $0.07/MTok | $0.30/MTok | **$0.80** |
-| Doubleword (1hr SLA) | Qwen 235B | 1423 | $0.15/MTok | $0.55/MTok | **$1.56** |
-| OpenAI | GPT-4o | 1442 | $2.50/MTok | $10.00/MTok | **$27.40** |
-| Anthropic | Claude Sonnet 4.5 | 1450 | $3.00/MTok | $15.00/MTok | **$38.15** |
+| Doubleword (1hr SLA) | Qwen 30B | 1382 | \$0.07/MTok | \$0.30/MTok | **\$0.80** |
+| Doubleword (1hr SLA) | Qwen 235B | 1423 | \$0.15/MTok | \$0.55/MTok | **\$1.56** |
+| OpenAI | GPT-4o | 1442 | \$2.50/MTok | \$10.00/MTok | **\$27.40** |
+| Anthropic | Claude Sonnet 4.5 | 1450 | \$3.00/MTok | \$15.00/MTok | **\$38.15** |
 
 ELO scores from [KEAR AI Chatbot Arena](https://kearai.com/leaderboard/chat) (January 2026). Pricing from [OpenAI](https://openai.com/api/pricing/) and [Anthropic](https://platform.claude.com/docs/en/about-claude/pricing).
 
@@ -184,4 +184,4 @@ The deduplication stage depends heavily on the quality of candidate generation. 
 
 ## Conclusion
 
-LLM-powered data processing at batch pricing with a 1-hour SLA turns what used to be a multi-day manual effort into a pipeline you can run in an afternoon for under a dollar. At $0.80 for 50,000 records through three processing stages, the cost is low enough that you can afford to run the pipeline iteratively: clean the data, inspect the results, adjust the prompts, and re-run. The quality won't match a dedicated data engineering team on high-value records, but for the broad middle ground of "good enough to be useful," batch LLM processing hits a compelling price-quality tradeoff that traditional approaches can't match.
+LLM-powered data processing at batch pricing with a 1-hour SLA turns what used to be a multi-day manual effort into a pipeline you can run in an afternoon for under a dollar. At \$0.80 for 50,000 records through three processing stages, the cost is low enough that you can afford to run the pipeline iteratively: clean the data, inspect the results, adjust the prompts, and re-run. The quality won't match a dedicated data engineering team on high-value records, but for the broad middle ground of "good enough to be useful," batch LLM processing hits a compelling price-quality tradeoff that traditional approaches can't match.

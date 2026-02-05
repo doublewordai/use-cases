@@ -1,16 +1,16 @@
-# Synthetic Data Generation: 10,000 Training Samples in 3 Hours for $3.21
+# Synthetic Data Generation: 10,000 Training Samples in 3 Hours for \$3.21
 
 Generating high-quality synthetic training data has traditionally required either expensive human annotation or costly API calls that make large-scale generation impractical. The other constraint is time: a three-stage pipeline (scenario generation, conversation generation, quality filtering) with a 24-hour SLA per batch would take three days minimum. With Doubleword's 1-hour SLA, the same pipeline completes in 3 hours.
 
-We generated 10,000 synthetic question-answer pairs for fine-tuning a customer support model, with controlled difficulty levels and topic coverage, for $3.21 on Doubleword's batch API versus $109 on GPT-4o realtime. At that price and speed, you can iterate on your data generation prompts the way you'd iterate on hyperparameters.
+We generated 10,000 synthetic question-answer pairs for fine-tuning a customer support model, with controlled difficulty levels and topic coverage, for \$3.21 on Doubleword's batch API versus \$109 on GPT-4o realtime. At that price and speed, you can iterate on your data generation prompts the way you'd iterate on hyperparameters.
 
 To run this yourself, sign up at [app.doubleword.ai](https://app.doubleword.ai) and generate an API key.
 
 ## Why This Matters
 
-Fine-tuning works, but it needs data. The standard approaches are: (1) collect real user interactions, which takes months and raises privacy concerns; (2) hire annotators, which costs $1-5 per sample and takes weeks; or (3) generate synthetic data from a larger model, which is fast but expensive at scale.
+Fine-tuning works, but it needs data. The standard approaches are: (1) collect real user interactions, which takes months and raises privacy concerns; (2) hire annotators, which costs \$1-5 per sample and takes weeks; or (3) generate synthetic data from a larger model, which is fast but expensive at scale.
 
-Option 3 is increasingly popular, but it has two bottlenecks: cost and latency. At realtime pricing, generating 10,000 samples costs over $100. And with a multi-stage pipeline, you're waiting for each batch to complete before submitting the next. A 24-hour SLA means three days of wall-clock time just for the batches, plus your own iteration cycles.
+Option 3 is increasingly popular, but it has two bottlenecks: cost and latency. At realtime pricing, generating 10,000 samples costs over \$100. And with a multi-stage pipeline, you're waiting for each batch to complete before submitting the next. A 24-hour SLA means three days of wall-clock time just for the batches, plus your own iteration cycles.
 
 Doubleword's 1-hour SLA changes both equations. Cost drops by 97%, and a three-stage pipeline completes in 3 hours rather than 3 days. This shifts the approach from "generate the minimum viable dataset" to "generate abundantly and curate aggressively," which produces better fine-tuned models.
 
@@ -18,10 +18,10 @@ Here's what our 10,000-sample run actually cost (11,494,746 input tokens, 8,009,
 
 | Provider | Model | ELO | Input Rate | Output Rate | Total Cost |
 |----------|-------|-----|------------|-------------|------------|
-| Doubleword (1hr SLA) | Qwen 30B | 1382 | $0.07/MTok | $0.30/MTok | **$3.21** |
-| Doubleword (1hr SLA) | Qwen 235B | 1423 | $0.15/MTok | $0.55/MTok | **$6.13** |
-| OpenAI | GPT-4o | 1442 | $2.50/MTok | $10.00/MTok | **$108.83** |
-| Anthropic | Claude Sonnet 4.5 | 1450 | $3.00/MTok | $15.00/MTok | **$154.62** |
+| Doubleword (1hr SLA) | Qwen 30B | 1382 | \$0.07/MTok | \$0.30/MTok | **\$3.21** |
+| Doubleword (1hr SLA) | Qwen 235B | 1423 | \$0.15/MTok | \$0.55/MTok | **\$6.13** |
+| OpenAI | GPT-4o | 1442 | \$2.50/MTok | \$10.00/MTok | **\$108.83** |
+| Anthropic | Claude Sonnet 4.5 | 1450 | \$3.00/MTok | \$15.00/MTok | **\$154.62** |
 
 ELO scores from [KEAR AI Chatbot Arena](https://kearai.com/leaderboard/chat) (January 2026). Pricing from [OpenAI](https://openai.com/api/pricing/) and [Anthropic](https://platform.claude.com/docs/en/about-claude/pricing).
 
@@ -202,4 +202,4 @@ The generated data is only as good as the scenario distribution you define. We m
 
 ## Conclusion
 
-Synthetic data generation at batch pricing with a 1-hour SLA makes it practical to generate training datasets measured in tens of thousands rather than hundreds, and to iterate on them in hours rather than days. At $3.21 for 10,000 samples via Doubleword's batch API, the cost of data generation drops below the cost of data curation. You can afford to generate abundantly, filter aggressively, and iterate on your generation prompts until the distribution matches what you need. For teams building fine-tuned models, this means the bottleneck shifts from "can we afford enough training data?" to "have we designed the right distribution?", which is a much better problem to have.
+Synthetic data generation at batch pricing with a 1-hour SLA makes it practical to generate training datasets measured in tens of thousands rather than hundreds, and to iterate on them in hours rather than days. At \$3.21 for 10,000 samples via Doubleword's batch API, the cost of data generation drops below the cost of data curation. You can afford to generate abundantly, filter aggressively, and iterate on your generation prompts until the distribution matches what you need. For teams building fine-tuned models, this means the bottleneck shifts from "can we afford enough training data?" to "have we designed the right distribution?", which is a much better problem to have.

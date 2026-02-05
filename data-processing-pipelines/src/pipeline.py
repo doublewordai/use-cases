@@ -11,7 +11,14 @@ import re
 import requests
 from thefuzz import fuzz
 
-from .prompts import DEDUP_PROMPT, ENRICH_PROMPT, NORMALIZE_PROMPT
+from .prompts import (
+    DEDUP_PROMPT,
+    DEDUP_SCHEMA,
+    ENRICH_PROMPT,
+    ENRICH_SCHEMA,
+    NORMALIZE_PROMPT,
+    NORMALIZE_SCHEMA,
+)
 
 SEC_EDGAR_URL = "https://www.sec.gov/files/company_tickers_exchange.json"
 SEC_USER_AGENT = "DoublewordAI research@doubleword.ai"
@@ -112,6 +119,7 @@ def build_normalize_requests(records: list[dict], model: str) -> list[dict]:
                     {"role": "system", "content": NORMALIZE_PROMPT},
                     {"role": "user", "content": user_content},
                 ],
+                "response_format": NORMALIZE_SCHEMA,
                 "max_tokens": 512,
                 "temperature": 0,
             }
@@ -142,6 +150,7 @@ def build_enrich_requests(records: list[dict], model: str) -> list[dict]:
                     {"role": "system", "content": ENRICH_PROMPT},
                     {"role": "user", "content": user_content},
                 ],
+                "response_format": ENRICH_SCHEMA,
                 "max_tokens": 512,
                 "temperature": 0,
             }
@@ -284,6 +293,7 @@ def build_dedup_requests(pairs: list[tuple], model: str) -> list[dict]:
                     {"role": "system", "content": DEDUP_PROMPT},
                     {"role": "user", "content": user_content},
                 ],
+                "response_format": DEDUP_SCHEMA,
                 "max_tokens": 256,
                 "temperature": 0,
             }

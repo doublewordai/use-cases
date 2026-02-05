@@ -41,16 +41,21 @@ def create_batch_file(requests_data: list[dict], output_path: Path) -> Path:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, "w") as f:
         for req in requests_data:
+            body = {
+                "model": req["model"],
+                "messages": req["messages"],
+                "temperature": req.get("temperature", 0),
+                "max_tokens": req.get("max_tokens", 512),
+            }
+            # Include response_format for structured outputs if provided
+            if "response_format" in req:
+                body["response_format"] = req["response_format"]
+
             line = {
                 "custom_id": req["custom_id"],
                 "method": "POST",
                 "url": "/v1/chat/completions",
-                "body": {
-                    "model": req["model"],
-                    "messages": req["messages"],
-                    "temperature": req.get("temperature", 0),
-                    "max_tokens": req.get("max_tokens", 512),
-                },
+                "body": body,
             }
             f.write(json.dumps(line) + "\n")
     return output_path

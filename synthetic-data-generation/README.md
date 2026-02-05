@@ -56,79 +56,86 @@ We also ran a diversity analysis. Across the 8,420 accepted conversations, we fo
 
 ## How It Works
 
-The pipeline generates data in three passes, each submitted as a separate batch. The first pass creates scenarios with controlled attributes:
+The pipeline generates data in three passes, each submitted as a separate batch. All stages use [structured outputs](https://platform.openai.com/docs/guides/structured-outputs) to guarantee valid JSON responses, eliminating the need for fuzzy JSON parsing.
+
+The first pass creates scenarios with controlled attributes. Each request includes a JSON schema that defines the exact output format:
 
 ```python
-def build_scenario_requests(count: int, model: str, topics=SUPPORT_TOPICS,
-                            difficulty_dist=DIFFICULTY_DISTRIBUTION,
-                            domain="customer support", product="SaaS platform") -> list[dict]:
-    """Distributes scenarios evenly across topics and difficulty levels."""
-    system_prompt = SCENARIO_SYSTEM_PROMPT.format(domain=domain, product=product)
+SCENARIO_SCHEMA = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "scenario",
+        "strict": True,
+        "schema": {
+            "type": "object",
+            "properties": {
+                "customer_name": {"type": "string"},
+                "topic": {"type": "string"},
+                "difficulty": {"type": "string", "enum": ["easy", "medium", "hard"]},
+                "situation": {"type": "string"},
+                "prior_attempts": {"type": "string"},
+                "sentiment": {"type": "string", "enum": ["frustrated", "neutral", "positive"]},
+                "desired_turns": {"type": "integer"},
+            },
+            "required": ["customer_name", "topic", "difficulty", "situation",
+                        "prior_attempts", "sentiment", "desired_turns"],
+            "additionalProperties": False,
+        },
+    },
+}
+
+def build_scenario_requests(count: int, model: str, ...) -> list[dict]:
     requests_data = []
-    idx = 0
-    per_topic = math.ceil(count / len(topics))
     for topic in topics:
         for difficulty, proportion in difficulty_dist.items():
-            n = max(1, round(per_topic * proportion))
-            for _ in range(n):
-                if idx >= count:
-                    break
-                requests_data.append({
-                    "custom_id": f"scenario-{idx:06d}",
-                    "model": model,
-                    "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": f"Generate a {domain} scenario.\n"
-                            f"Topic: {topic}\nDifficulty: {difficulty}"},
-                    ],
-                    "temperature": 0.8,
-                    "max_tokens": 512,
-                })
-                idx += 1
+            # ... distribution logic ...
+            requests_data.append({
+                "custom_id": f"scenario-{idx:06d}",
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": f"Generate a {domain} scenario.\n"
+                        f"Topic: {topic}\nDifficulty: {difficulty}"},
+                ],
+                "response_format": SCENARIO_SCHEMA,  # Guarantees valid JSON
+                "temperature": 0.8,
+                "max_tokens": 512,
+            })
     return requests_data
 ```
 
-The second pass takes each scenario and generates a full conversation:
+The second pass generates conversations. The schema ensures each conversation has a properly structured messages array:
 
 ```python
-def build_conversation_requests(scenarios: list[dict], model: str) -> list[dict]:
-    requests_data = []
-    for idx, scenario in enumerate(scenarios):
-        requests_data.append({
-            "custom_id": f"conv-{idx:06d}",
-            "model": model,
-            "messages": [
-                {"role": "system", "content": CONVERSATION_SYSTEM_PROMPT},
-                {"role": "user", "content": f"Generate a conversation for this scenario:\n\n"
-                    f"{json.dumps(scenario, indent=2)}"},
-            ],
-            "temperature": 0.7,
-            "max_tokens": 2048,
-        })
-    return requests_data
+CONVERSATION_SCHEMA = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "conversation",
+        "strict": True,
+        "schema": {
+            "type": "object",
+            "properties": {
+                "messages": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "role": {"type": "string", "enum": ["customer", "agent"]},
+                            "content": {"type": "string"},
+                        },
+                        "required": ["role", "content"],
+                        "additionalProperties": False,
+                    },
+                },
+            },
+            "required": ["messages"],
+            "additionalProperties": False,
+        },
+    },
+}
 ```
 
-Quality filtering runs as a third batch pass where a separate prompt scores each conversation on three dimensions:
-
-```python
-def build_quality_requests(conversations: list[dict], model: str) -> list[dict]:
-    requests_data = []
-    for idx, conversation in enumerate(conversations):
-        requests_data.append({
-            "custom_id": f"quality-{idx:06d}",
-            "model": model,
-            "messages": [
-                {"role": "system", "content": QUALITY_SYSTEM_PROMPT},
-                {"role": "user", "content": f"Evaluate this customer support conversation:\n\n"
-                    f"{json.dumps(conversation, indent=2)}"},
-            ],
-            "temperature": 0,
-            "max_tokens": 256,
-        })
-    return requests_data
-```
-
-Conversations scoring below 3.5 average across the three dimensions are filtered out.
+Quality filtering runs as a third batch pass, scoring each conversation on three dimensions. Conversations scoring below 3.5 average are filtered out.
 
 ## Running It Yourself
 

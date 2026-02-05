@@ -21,7 +21,6 @@ from .generator import (
     build_scenario_requests,
     format_for_training,
     load_seed_topics,
-    parse_json_response,
 )
 from .prompts import SUPPORT_TOPICS
 
@@ -182,14 +181,15 @@ def run(
     total_tokens["input_tokens"] += tokens["input_tokens"]
     total_tokens["output_tokens"] += tokens["output_tokens"]
 
+    # Structured outputs guarantee valid JSON
     scenarios = []
     for custom_id in sorted(scenario_results.keys()):
         content = _extract_content(scenario_results[custom_id])
         if content:
             try:
-                scenario = parse_json_response(content)
+                scenario = json.loads(content)
                 scenarios.append(scenario)
-            except (json.JSONDecodeError, ValueError):
+            except json.JSONDecodeError:
                 click.echo(f"  Warning: failed to parse {custom_id}")
 
     with open(output_dir / "scenarios.json", "w") as f:
@@ -214,9 +214,9 @@ def run(
         content = _extract_content(conv_results[custom_id])
         if content:
             try:
-                conversation = parse_json_response(content)
+                conversation = json.loads(content)
                 conversations.append(conversation)
-            except (json.JSONDecodeError, ValueError):
+            except json.JSONDecodeError:
                 click.echo(f"  Warning: failed to parse {custom_id}")
 
     with open(output_dir / "conversations.json", "w") as f:
@@ -241,9 +241,9 @@ def run(
         content = _extract_content(quality_results[custom_id])
         if content:
             try:
-                score = parse_json_response(content)
+                score = json.loads(content)
                 scores.append(score)
-            except (json.JSONDecodeError, ValueError):
+            except json.JSONDecodeError:
                 click.echo(f"  Warning: failed to parse {custom_id}")
 
     with open(output_dir / "scores.json", "w") as f:

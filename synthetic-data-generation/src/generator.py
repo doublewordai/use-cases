@@ -3,12 +3,14 @@
 import csv
 import json
 import math
-import re
 
 from .prompts import (
+    CONVERSATION_SCHEMA,
     CONVERSATION_SYSTEM_PROMPT,
     DIFFICULTY_DISTRIBUTION,
+    QUALITY_SCHEMA,
     QUALITY_SYSTEM_PROMPT,
+    SCENARIO_SCHEMA,
     SCENARIO_SYSTEM_PROMPT,
     SUPPORT_TOPICS,
 )
@@ -83,6 +85,7 @@ def build_scenario_requests(
                                 ),
                             },
                         ],
+                        "response_format": SCENARIO_SCHEMA,
                         "temperature": 0.8,
                         "max_tokens": 512,
                     }
@@ -121,6 +124,7 @@ def build_conversation_requests(
                         ),
                     },
                 ],
+                "response_format": CONVERSATION_SCHEMA,
                 "temperature": 0.7,
                 "max_tokens": 2048,
             }
@@ -150,20 +154,12 @@ def build_quality_requests(
                         ),
                     },
                 ],
+                "response_format": QUALITY_SCHEMA,
                 "temperature": 0,
                 "max_tokens": 256,
             }
         )
     return requests_data
-
-
-def parse_json_response(text: str) -> dict:
-    """Parse JSON from model output, handling ```json code blocks."""
-    match = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", text, re.DOTALL)
-    if match:
-        text = match.group(1).strip()
-
-    return json.loads(text)
 
 
 def format_for_training(

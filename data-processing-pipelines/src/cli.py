@@ -24,7 +24,6 @@ from .pipeline import (
     download_sec_data,
     generate_dedup_candidates,
     load_csv_data,
-    parse_json_response,
 )
 
 MODELS = {
@@ -262,14 +261,14 @@ def run(input_path: str, output: str, model: str, provider: str, dry_run: bool):
     total_tokens["input_tokens"] += tokens["input_tokens"]
     total_tokens["output_tokens"] += tokens["output_tokens"]
 
-    # Apply normalization results
+    # Apply normalization results (structured outputs guarantee valid JSON)
     for record in records:
         key = f"normalize-{record['id']}"
         if key in norm_results:
             content = _extract_content(norm_results[key])
             if content:
-                norm_data = parse_json_response(content)
-                if norm_data:
+                try:
+                    norm_data = json.loads(content)
                     record["normalized_name"] = norm_data.get(
                         "normalized_name", record["name"]
                     )
@@ -278,6 +277,8 @@ def run(input_path: str, output: str, model: str, provider: str, dry_run: bool):
                     record["state"] = norm_data.get("state", "")
                     record["zip_code"] = norm_data.get("zip_code", "")
                     record["country"] = norm_data.get("country", "")
+                except json.JSONDecodeError:
+                    pass  # Skip malformed responses
 
     norm_output = output_dir / "stage1_normalized.json"
     with open(norm_output, "w") as f:
@@ -335,20 +336,27 @@ def run(input_path: str, output: str, model: str, provider: str, dry_run: bool):
             if key in dedup_results:
                 content = _extract_content(dedup_results[key])
                 if content:
-                    dedup_data = parse_json_response(content)
-                    if dedup_data and dedup_data.get("is_duplicate"):
-                        duplicates.append(
-                            {
-                                "record_a": rec_a["id"],
-                                "record_b": rec_b["id"],
-                                "name_a": rec_a.get("normalized_name", rec_a["name"]),
-                                "name_b": rec_b.get("normalized_name", rec_b["name"]),
-                                "fuzzy_score": score,
-                                "confidence": dedup_data.get("confidence", ""),
-                                "relationship": dedup_data.get("relationship", ""),
-                            }
-                        )
-                        duplicate_ids.add(rec_b["id"])
+                    try:
+                        dedup_data = json.loads(content)
+                        if dedup_data.get("is_duplicate"):
+                            duplicates.append(
+                                {
+                                    "record_a": rec_a["id"],
+                                    "record_b": rec_b["id"],
+                                    "name_a": rec_a.get(
+                                        "normalized_name", rec_a["name"]
+                                    ),
+                                    "name_b": rec_b.get(
+                                        "normalized_name", rec_b["name"]
+                                    ),
+                                    "fuzzy_score": score,
+                                    "confidence": dedup_data.get("confidence", ""),
+                                    "relationship": dedup_data.get("relationship", ""),
+                                }
+                            )
+                            duplicate_ids.add(rec_b["id"])
+                    except json.JSONDecodeError:
+                        pass  # Skip malformed responses
 
     dedup_output = output_dir / "stage2_duplicates.json"
     with open(dedup_output, "w") as f:
@@ -378,12 +386,14 @@ def run(input_path: str, output: str, model: str, provider: str, dry_run: bool):
         if key in enrich_results:
             content = _extract_content(enrich_results[key])
             if content:
-                enrich_data = parse_json_response(content)
-                if enrich_data:
+                try:
+                    enrich_data = json.loads(content)
                     record["industry"] = enrich_data.get("industry", "")
                     record["sub_industry"] = enrich_data.get("sub_industry", "")
                     record["size"] = enrich_data.get("size", "")
                     record["industry_confidence"] = enrich_data.get("confidence", "")
+                except json.JSONDecodeError:
+                    pass  # Skip malformed responses
 
     enrich_output = output_dir / "stage3_enriched.json"
     with open(enrich_output, "w") as f:

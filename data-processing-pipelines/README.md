@@ -55,19 +55,38 @@ Deduplication identified 1,847 confirmed duplicate pairs from 3,200 candidates (
 
 ## How It Works
 
-The pipeline runs as three sequential batch jobs. Each stage writes its output to a file that the next stage reads as input.
+The pipeline runs as three sequential batch jobs. Each stage writes its output to a file that the next stage reads as input. All stages use [structured outputs](https://platform.openai.com/docs/guides/structured-outputs) to guarantee valid JSON responses, eliminating the need for fuzzy JSON parsing or retry logic.
 
-The normalize stage sends each record with a structured prompt asking for standardized fields:
+The normalize stage sends each record with a JSON schema that defines the exact output format:
 
 ```python
+NORMALIZE_SCHEMA = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "normalized_company",
+        "strict": True,
+        "schema": {
+            "type": "object",
+            "properties": {
+                "normalized_name": {"type": "string"},
+                "street": {"type": "string"},
+                "city": {"type": "string"},
+                "state": {"type": "string"},
+                "zip_code": {"type": "string"},
+                "country": {"type": "string"},
+            },
+            "required": ["normalized_name", "street", "city", "state", "zip_code", "country"],
+            "additionalProperties": False,
+        },
+    },
+}
+
 def build_normalize_requests(records: list[dict], model: str) -> list[dict]:
     requests_data = []
     for record in records:
         user_content = f"Company name: {record['name']}"
         if record.get("ticker"):
             user_content += f"\nTicker: {record['ticker']}"
-        if record.get("exchange"):
-            user_content += f"\nExchange: {record['exchange']}"
         requests_data.append({
             "custom_id": f"normalize-{record['id']}",
             "model": model,
@@ -75,13 +94,14 @@ def build_normalize_requests(records: list[dict], model: str) -> list[dict]:
                 {"role": "system", "content": NORMALIZE_PROMPT},
                 {"role": "user", "content": user_content},
             ],
+            "response_format": NORMALIZE_SCHEMA,  # Guarantees valid JSON
             "max_tokens": 512,
             "temperature": 0,
         })
     return requests_data
 ```
 
-The system prompt asks the model to return JSON with standardized fields. We use `temperature=0` for deterministic outputs and keep `max_tokens` low since responses are structured and short.
+The `response_format` parameter with `strict: True` ensures the model's output always matches the schema. No more parsing markdown code blocks or handling malformed JSON.
 
 The enrich stage takes normalized records and classifies them into a predefined taxonomy:
 
@@ -161,8 +181,6 @@ The `results/` directory contains outputs from each stage, along with summary st
 The pipeline works best on English-language records. Company names in other languages may not normalize correctly, and the industry classification taxonomy is US-centric. For international datasets, you'd want to adjust the prompts and taxonomy accordingly.
 
 The deduplication stage depends heavily on the quality of candidate generation. We used simple fuzzy string matching (Levenshtein distance), which misses pairs where the names are semantically similar but textually different (e.g., "IBM" and "International Business Machines"). A more sophisticated approach would use embeddings for candidate generation, at which point you're building a full entity resolution system, which is beyond the scope of this example.
-
-Structured output parsing occasionally fails when the model returns malformed JSON. We handle this with a retry mechanism, but ~0.5% of records across all stages required fallback handling. In production, you'd want validation and a human review queue for edge cases.
 
 ## Conclusion
 

@@ -19,9 +19,8 @@ def load_wikipedia_abstracts(limit: int = 100000) -> list[dict]:
         streaming=True,
     )
 
-    for i, row in enumerate(dataset):
-        if i >= limit:
-            break
+    # Use take() to cleanly limit the streaming dataset
+    for i, row in enumerate(dataset.take(limit)):
         text = row["text"]
         first_para = text.split("\n\n")[0] if "\n\n" in text else text[:500]
         if len(first_para.strip()) < 50:

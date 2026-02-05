@@ -23,7 +23,7 @@ from .index import build_index, load_index, save_index, search
 
 # Embedding models have different aliases
 MODELS = {
-    "qwen3-emb": "Qwen/Qwen3-Embedding-0.6B",
+    "qwen3-emb": "Qwen/Qwen3-Embedding-8B",
     "text-emb-large": "text-embedding-3-large",
     "text-emb-small": "text-embedding-3-small",
 }

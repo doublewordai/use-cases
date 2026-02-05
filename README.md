@@ -1,10 +1,10 @@
 # Doubleword Batch API Examples
 
-Nine production-ready examples demonstrating what becomes possible when LLM inference is cheap enough to use at scale. Each example includes working code, real-world data, and measured costs.
+Production-ready examples demonstrating what becomes possible when LLM inference is cheap enough to use at scale. Each example includes working code, real-world data, and measured costs.
 
 To get started, sign up at [app.doubleword.ai](https://app.doubleword.ai) and generate an API key.
 
-## The Examples
+## CLI Examples
 
 | Example | What It Does | Cost | Key Insight |
 |---------|--------------|------|-------------|

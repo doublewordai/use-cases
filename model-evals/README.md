@@ -119,6 +119,14 @@ uv run model-evals analyze
 
 This produces accuracy metrics, error breakdowns, and cost summaries. The `results/` directory contains raw outputs for deeper analysis.
 
+## Limitations
+
+**Single benchmark.** GSM8K measures math reasoning; your use case may require different capabilities (code generation, multilingual, domain knowledge). The 5x cost ratio holds, but accuracy gaps may differ.
+
+**Prompt sensitivity.** We used a simple prompt format. More sophisticated prompting (chain-of-thought, few-shot) could shift the accuracy rankings.
+
+**Snapshot in time.** Model capabilities and pricing change. These results reflect February 2026; verify current pricing before production decisions.
+
 ## Notes
 
 Batch inference trades latency for cost. The 24-hour processing window is ideal for evaluation pipelines, CI/CD, and any workflow where you're measuring rather than shipping. For interactive applications, realtime pricing applies.

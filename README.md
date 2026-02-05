@@ -94,19 +94,6 @@ example-name/
 └── results/           # Output artifacts (gitignored)
 ```
 
-## Documentation Standards
-
-Each README includes:
-
-- **Thesis in the first paragraph**: What becomes possible with cheap batch inference
-- **Call to action**: Link to sign up and get an API key
-- **Real-world data**: Not synthetic or toy datasets
-- **Cost comparison**: Actual dollars spent with pricing sources cited
-- **Limitations**: What the example doesn't cover or where results may not generalize
-- **Replication instructions**: Step-by-step commands to reproduce results
-
-The examples are written in a conversational, technical voice. They show reasoning (what doesn't work before what does), acknowledge uncertainty, and avoid corporate cliches.
-
 ## Requirements
 
 - Python 3.11+

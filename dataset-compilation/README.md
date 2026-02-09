@@ -54,26 +54,26 @@ We found all 11 vendors and the filtering step classified each one correctly, gi
 
 ### Cost Breakdown
 
-| Step | API | Requests | Cost |
-|------|-----|----------|------|
-| Generate queries | Doubleword (real-time) | ~50 | \$0.10 |
-| Initial search | [Serper](https://serper.dev/pricing) | 125 | \$0.13 |
-| Extract companies | Doubleword (batch) | 1,216 | \$0.40 |
-| LLM deduplication | Doubleword (batch) | 7 | \$0.02 |
-| Validation search | Serper | 285 | \$0.29 |
-| Validation classify | Doubleword (batch) | 285 | \$0.09 |
-| Final deduplication | Doubleword (batch) | 3 | \$0.01 |
-| **Total** | | | **~\$1.05** |
+| Step | Provider | API | Requests | Cost |
+|------|----------|-----|----------|------|
+| Generate queries | Doubleword | Qwen3-30B (real-time) | ~50 | \$0.10 |
+| Initial search | [Serper](https://serper.dev/pricing) | Web search | 125 | \$0.13 |
+| Extract companies | Doubleword | Qwen3-30B (batch) | 1,216 | \$0.40 |
+| LLM deduplication | Doubleword | Qwen3-30B (batch) | 7 | \$0.02 |
+| Validation search | Serper | Web search | 285 | \$0.29 |
+| Validation classify | Doubleword | Qwen3-30B (batch) | 285 | \$0.09 |
+| Final deduplication | Doubleword | Qwen3-30B (batch) | 3 | \$0.01 |
+| **Total** | | | | **~\$1.05** |
 
 Doubleword batch pricing is 50% off standard rates ([pricing](https://doubleword.ai/pricing)). Serper charges \$0.001 per search.
 
 For comparison:
 
-| Approach | Cost | Coverage |
-|----------|------|----------|
-| Junior analyst (2 days) | \$500-800 | Finds the obvious names |
-| Crunchbase subscription | \$5,000+/year | Good for VC-backed startups, weak on established players |
-| **LLM + search (this approach)** | **~\$1** | 188 validated companies, 100% Gartner recall |
+| Approach | Provider | Cost | Coverage |
+|----------|----------|------|----------|
+| Junior analyst (2 days) | Manual | \$500-800 | Finds the obvious names |
+| Crunchbase subscription | Crunchbase | \$5,000+/year | Good for VC-backed startups, weak on established players |
+| **LLM + search (this approach)** | **Doubleword + Serper** | **~\$1** | 188 validated companies, 100% Gartner recall |
 
 The cost difference is roughly 500x. You can run hundreds of queries, validate every candidate, and iterate on the pipeline freely.
 

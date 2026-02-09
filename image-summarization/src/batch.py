@@ -18,7 +18,7 @@ def get_client() -> OpenAI:
 
     return OpenAI(
         api_key=api_key,
-        base_url="https://api.doubleword.ai/v1",
+        base_url="http://localhost:3001/ai/v1",
     )
 
 

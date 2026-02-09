@@ -10,13 +10,13 @@ To run this yourself, sign up at [app.doubleword.ai](https://app.doubleword.ai) 
 
 We extracted three fields from each receipt (vendor name, date, total amount) and compared against ground truth labels from the [SROIE dataset](https://rrc.cvc.uab.es/?ch=13), an academic benchmark of 626 scanned Malaysian receipts from ICDAR 2019.
 
-| Model | Overall | Vendor Name | Date | Total | Cost (626 receipts) |
-|-------|---------|-------------|------|-------|---------------------|
-| **Qwen3-VL-235B** | **93.0%** | **87.7%** | **92.5%** | **98.9%** | \$0.58 |
-| Qwen3-VL-30B | 90.6% | 86.1% | 90.7% | 94.9% | \$0.12 |
-| GPT-5-mini | 87.7% | 77.8% | 88.0% | 97.4% | \$0.15 |
-| GPT-5.2 | 86.9% | 77.8% | 86.2% | 96.8% | \$1.51 |
-| GPT-5-nano | 84.3% | 73.1% | 84.3% | 95.5% | \$0.23 |
+| Provider | Model | Overall | Vendor Name | Date | Total | Cost (626 receipts) |
+|----------|-------|---------|-------------|------|-------|---------------------|
+| **Doubleword** | **Qwen3-VL-235B** | **93.0%** | **87.7%** | **92.5%** | **98.9%** | \$0.58 |
+| Doubleword | Qwen3-VL-30B | 90.6% | 86.1% | 90.7% | 94.9% | \$0.12 |
+| OpenAI | GPT-5-mini | 87.7% | 77.8% | 88.0% | 97.4% | \$0.15 |
+| OpenAI | GPT-5.2 | 86.9% | 77.8% | 86.2% | 96.8% | \$1.51 |
+| OpenAI | GPT-5-nano | 84.3% | 73.1% | 84.3% | 95.5% | \$0.23 |
 
 The Qwen models pull ahead on vendor name extraction, which is the hardest field. Qwen3-30B gets 86.1% of vendor names correct versus GPT-5-mini's 77.8%, an 8.3 percentage point gap. This matters because vendor names are where real-world extraction typically fails: receipts display multiple business names (franchise plus operator, building plus tenant), and the model needs to pick the right one.
 
@@ -30,13 +30,13 @@ The Qwen models show 2x more input tokens than GPT for the same images. This is 
 
 The output token differences are also notable: GPT-5-nano generates 833K tokens versus Qwen's 56-59K for the same extraction task. Combined with GPT's higher per-token rates (GPT-5.2 charges 25x more per input token than Qwen3-30B), the cost difference adds up fast.
 
-| Model | Input Tokens | Output Tokens | Batch Cost | Per Receipt |
-|-------|--------------|---------------|------------|-------------|
-| **Qwen3-VL-30B** | 2.14M | 59K | **\$0.12** | **\$0.00019** |
-| GPT-5-mini | 1.00M | 257K | \$0.15 | \$0.00024 |
-| GPT-5-nano | 1.23M | 833K | \$0.23 | \$0.00037 |
-| Qwen3-VL-235B | 2.14M | 56K | \$0.58 | \$0.00093 |
-| GPT-5.2 | 1.00M | 51K | \$1.51 | \$0.00242 |
+| Provider | Model | Input Tokens | Output Tokens | Batch Cost | Per Receipt |
+|----------|-------|--------------|---------------|------------|-------------|
+| **Doubleword** | **Qwen3-VL-30B** | 2.14M | 59K | **\$0.12** | **\$0.00019** |
+| OpenAI | GPT-5-mini | 1.00M | 257K | \$0.15 | \$0.00024 |
+| OpenAI | GPT-5-nano | 1.23M | 833K | \$0.23 | \$0.00037 |
+| Doubleword | Qwen3-VL-235B | 2.14M | 56K | \$0.58 | \$0.00093 |
+| OpenAI | GPT-5.2 | 1.00M | 51K | \$1.51 | \$0.00242 |
 
 We ran the GPT models via OpenAI's real-time API (their batch API doesn't support 1-hour SLAs or partial result downloads). For a fair cost comparison, we quote OpenAI's batch pricing throughout.
 
@@ -44,22 +44,22 @@ Prices: [OpenAI pricing](https://platform.openai.com/docs/pricing), [Doubleword 
 
 ### Which model to use
 
-| Need | Model | Accuracy | Cost/Receipt |
-|------|-------|----------|--------------|
-| Best value | Qwen3-VL-30B | 90.6% | \$0.00019 |
-| Maximum accuracy | Qwen3-VL-235B | 93.0% | \$0.00093 |
+| Need | Provider | Model | Accuracy | Cost/Receipt |
+|------|----------|-------|----------|--------------|
+| Best value | Doubleword | Qwen3-VL-30B | 90.6% | \$0.00019 |
+| Maximum accuracy | Doubleword | Qwen3-VL-235B | 93.0% | \$0.00093 |
 
 The GPT models don't make a compelling case for this task. GPT-5-mini costs more than Qwen3-30B with lower accuracy. GPT-5.2 costs 12x more than Qwen3-30B with even lower accuracy. GPT-5-nano is the cheapest GPT option but has the worst accuracy by a significant margin.
 
 ### Error analysis
 
-| Model | Vendor Errors | Date Errors | Total Errors | Total Errors |
-|-------|---------------|-------------|--------------|--------------|
-| Qwen3-VL-235B | 77 | 47 | 7 | 131 |
-| Qwen3-VL-30B | 87 | 58 | 32 | 177 |
-| GPT-5-mini | 139 | 75 | 16 | 230 |
-| GPT-5.2 | 139 | 86 | 20 | 245 |
-| GPT-5-nano | 168 | 98 | 28 | 294 |
+| Provider | Model | Vendor Errors | Date Errors | Total Errors | Total Errors |
+|----------|-------|---------------|-------------|--------------|--------------|
+| Doubleword | Qwen3-VL-235B | 77 | 47 | 7 | 131 |
+| Doubleword | Qwen3-VL-30B | 87 | 58 | 32 | 177 |
+| OpenAI | GPT-5-mini | 139 | 75 | 16 | 230 |
+| OpenAI | GPT-5.2 | 139 | 86 | 20 | 245 |
+| OpenAI | GPT-5-nano | 168 | 98 | 28 | 294 |
 
 Vendor name errors dominate across all models. The Qwen models make roughly half as many vendor name errors as the GPT models (77-87 vs 139-168).
 

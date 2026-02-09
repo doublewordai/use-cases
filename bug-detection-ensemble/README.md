@@ -16,12 +16,12 @@ We used CVEfixes, a dataset of functions from real vulnerability-fixing commits.
 
 ### Fine-grained classification is hard
 
-| Model | Accuracy (24 classes) | Cost |
-|-------|----------------------|------|
-| GPT-5.2 | 19.5% | \$8.00 |
-| Qwen3-30B | 19.2% | \$0.40 |
-| GPT-5-mini | 17.7% | \$0.80 |
-| Qwen3-235B | 16.2% | \$1.20 |
+| Provider | Model | Accuracy (24 classes) | Cost |
+|----------|-------|----------------------|------|
+| OpenAI | GPT-5.2 | 19.5% | \$8.00 |
+| Doubleword | Qwen3-30B | 19.2% | \$0.40 |
+| OpenAI | GPT-5-mini | 17.7% | \$0.80 |
+| Doubleword | Qwen3-235B | 16.2% | \$1.20 |
 
 Random baseline: 4.2%. All models are ~4-5x better than random, but 20% accuracy isn't useful for production. The models confuse similar CWEs—CWE-125 (out-of-bounds read) vs CWE-787 (out-of-bounds write) requires understanding whether the bug allows reading or writing, and they often get this wrong.
 
@@ -29,21 +29,21 @@ Random baseline: 4.2%. All models are ~4-5x better than random, but 20% accuracy
 
 Grouping into broader categories improves accuracy substantially:
 
-| Model | Accuracy (8 groups) | Memory Safety | Pointer | Integer | Cost |
-|-------|---------------------|---------------|---------|---------|------|
-| **Qwen3-30B** | **46.5%** | **82.2%** | 34.9% | 14.3% | **\$0.40** |
-| Qwen3-235B | 38.6% | 59.5% | 33.2% | 10.7% | \$1.20 |
-| GPT-5-mini | 38.3% | 56.0% | 47.0% | 21.1% | \$0.80 |
-| GPT-5.2 | 35.2% | 44.6% | 41.5% | 27.7% | \$8.00 |
+| Provider | Model | Accuracy (8 groups) | Memory Safety | Pointer | Integer | Cost |
+|----------|-------|---------------------|---------------|---------|---------|------|
+| **Doubleword** | **Qwen3-30B** | **46.5%** | **82.2%** | 34.9% | 14.3% | **\$0.40** |
+| Doubleword | Qwen3-235B | 38.6% | 59.5% | 33.2% | 10.7% | \$1.20 |
+| OpenAI | GPT-5-mini | 38.3% | 56.0% | 47.0% | 21.1% | \$0.80 |
+| OpenAI | GPT-5.2 | 35.2% | 44.6% | 41.5% | 27.7% | \$8.00 |
 
 Random baseline: 12.5%. Qwen3-30B hits 46.5%, driven by 82% accuracy on Memory Safety (buffer overflows, out-of-bounds access). Memory Safety is half the dataset, so this specialization pays off in the aggregate numbers.
 
 ### Which model to use
 
-| Need | Model | Accuracy | Cost |
-|------|-------|----------|------|
-| Best value | Qwen3-30B | 46.5% grouped | \$0.40 |
-| Balanced across categories | GPT-5.2 | 35.2% grouped | \$8.00 |
+| Need | Provider | Model | Accuracy | Cost |
+|------|----------|-------|----------|------|
+| Best value | Doubleword | Qwen3-30B | 46.5% grouped | \$0.40 |
+| Balanced across categories | OpenAI | GPT-5.2 | 35.2% grouped | \$8.00 |
 
 Qwen3-30B is best if your vulnerabilities are mostly memory safety issues—common in C/C++ codebases. GPT-5.2 is more balanced across categories but costs 20x more with lower overall accuracy.
 

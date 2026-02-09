@@ -24,12 +24,12 @@ The model must reason through the steps and produce a numerical answer. We compa
 
 The flagship models have converged. GPT-5.2 leads with 96.9% accuracy, with Qwen3-235B just 0.9 percentage points behind—well within the range that prompt engineering or problem selection could close.
 
-| Model | Accuracy | Cost (batch) |
-|-------|----------|--------------|
-| GPT-5.2 | 96.9% (1278/1319) | \$1.06 |
-| Qwen3-235B | 96.0% (1266/1319) | \$0.21 |
-| GPT-5-mini | 95.5% (1260/1319) | \$0.51 |
-| Qwen3-30B | 94.7% (1249/1319) | \$0.08 |
+| Provider | Model | Accuracy | Cost (batch) |
+|----------|-------|----------|--------------|
+| OpenAI | GPT-5.2 | 96.9% (1278/1319) | \$1.06 |
+| Doubleword | Qwen3-235B | 96.0% (1266/1319) | \$0.21 |
+| OpenAI | GPT-5-mini | 95.5% (1260/1319) | \$0.51 |
+| Doubleword | Qwen3-30B | 94.7% (1249/1319) | \$0.08 |
 
 These numbers align with published benchmarks. OpenAI reports GPT-5-mini at ~93% on GSM8K; we measured slightly higher, likely due to prompt engineering. All four models exceed 94% accuracy, confirming that modern LLMs have largely solved grade-school math.
 
@@ -49,12 +49,12 @@ The failure sets overlap substantially across models, suggesting these are genui
 
 Here's the actual token usage and costs from our full GSM8K run:
 
-| Model | Input Tokens | Output Tokens | Input Cost | Output Cost | Total |
-|-------|--------------|---------------|------------|-------------|-------|
-| GPT-5.2 | 137,783 | 134,393 | \$0.12 | \$0.94 | **\$1.06** |
-| GPT-5-mini | 137,783 | 486,642 | \$0.02 | \$0.49 | **\$0.51** |
-| Qwen3-235B | 145,496 | 295,365 | \$0.03 | \$0.18 | **\$0.21** |
-| Qwen3-30B | 145,496 | 332,913 | \$0.01 | \$0.07 | **\$0.08** |
+| Provider | Model | Input Tokens | Output Tokens | Input Cost | Output Cost | Total |
+|----------|-------|--------------|---------------|------------|-------------|-------|
+| OpenAI | GPT-5.2 | 137,783 | 134,393 | \$0.12 | \$0.94 | **\$1.06** |
+| OpenAI | GPT-5-mini | 137,783 | 486,642 | \$0.02 | \$0.49 | **\$0.51** |
+| Doubleword | Qwen3-235B | 145,496 | 295,365 | \$0.03 | \$0.18 | **\$0.21** |
+| Doubleword | Qwen3-30B | 145,496 | 332,913 | \$0.01 | \$0.07 | **\$0.08** |
 
 Pricing: OpenAI Batch API at 50% off realtime ([source](https://platform.openai.com/docs/guides/batch)). Doubleword pricing at [doubleword.ai/pricing](https://doubleword.ai/pricing).
 
@@ -77,10 +77,10 @@ GSM8K is one benchmark. A rigorous evaluation pipeline runs multiple:
 
 At our measured cost-per-question, running this full suite weekly for a year:
 
-| Provider | Per Run | Annual (52 weeks) |
-|----------|---------|-------------------|
-| GPT-5.2 (OpenAI Batch) | ~\$18 | **~\$940** |
-| Qwen3-235B (Doubleword Batch) | ~\$3.50 | **~\$180** |
+| Provider | Model | Per Run | Annual (52 weeks) |
+|----------|-------|---------|-------------------|
+| OpenAI | GPT-5.2 | ~\$18 | **~\$940** |
+| Doubleword | Qwen3-235B | ~\$3.50 | **~\$180** |
 
 That's **\$760/year** back in your pocket—enough to matter, not enough to compromise on evaluation rigor. The 5x cost advantage holds across benchmarks because it's driven by per-token pricing, not problem complexity.
 

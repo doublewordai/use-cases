@@ -4,6 +4,7 @@ import asyncio
 import base64
 import io
 import json
+import math
 import os
 from pathlib import Path
 
@@ -35,14 +36,18 @@ MODELS = {
 }
 DEFAULT_MODEL = "30b"
 
-TARGET_WIDTH = 1280
-TARGET_HEIGHT = 720
+TARGET_WIDTH = 1920
+TARGET_HEIGHT = 1080
+
+IMAGES_PER_REQUEST = 20
+NUM_BATCH_FILES = 10
 
 PROMPT = (
-    "Summarize this image for a social media-style post.\n\n"
-    "Caption: {description}\n\n"
-    "Photographer: {photographer}\n\n"
-    "Write a concise summary ignoring any irrelevant metadata."
+    "You are given {num_images} images. For each image, write a concise social "
+    "media-style summary. Number your summaries 1 through {num_images} to match "
+    "the order the images appear.\n\n"
+    "Image metadata (in order):\n{metadata}\n\n"
+    "Write a concise summary for each image, ignoring any irrelevant metadata."
 )
 
 
@@ -91,7 +96,7 @@ async def fetch_images(urls: list[str], cache_dir: Path) -> list[str | None]:
 
         img = img.crop(box).resize((TARGET_WIDTH, TARGET_HEIGHT), Image.LANCZOS)
         buf = io.BytesIO()
-        img.save(buf, format="JPEG")
+        img.save(buf, format="JPEG", quality=95)
         return base64.b64encode(buf.getvalue()).decode("utf-8")
 
     ssl_context = ssl.create_default_context(cafile=certifi.where())
@@ -172,77 +177,108 @@ def run(input_path: str, output_dir: str, model: str, num_images: int, dry_run: 
     urls = df["photo_image_url"].tolist()
     b64_images = asyncio.run(fetch_images(urls, Path("image_cache")))
 
-    # Build batch requests
-    requests_data = []
+    # Collect valid images with their metadata
+    valid_images = []
     skipped = 0
     for idx, (_, row) in enumerate(df.iterrows()):
         b64 = b64_images[idx]
         if b64 is None:
             skipped += 1
             continue
-
         description = row.get("photo_description", "") or ""
         photographer = row.get("photographer_username", "") or ""
-        prompt = PROMPT.format(description=description, photographer=photographer)
+        valid_images.append((idx, b64, description, photographer))
+
+    click.echo(f"Valid images: {len(valid_images)} ({skipped} skipped)")
+
+    # Group into multi-image requests (IMAGES_PER_REQUEST images each)
+    requests_data = []
+    for group_start in range(0, len(valid_images), IMAGES_PER_REQUEST):
+        group = valid_images[group_start : group_start + IMAGES_PER_REQUEST]
+        group_idx = group_start // IMAGES_PER_REQUEST
+
+        # Build metadata block
+        metadata_lines = []
+        for i, (orig_idx, _, desc, photog) in enumerate(group, 1):
+            metadata_lines.append(f"{i}. Caption: {desc} | Photographer: {photog}")
+        metadata = "\n".join(metadata_lines)
+
+        prompt = PROMPT.format(num_images=len(group), metadata=metadata)
+
+        # Build content array: text prompt followed by all images
+        content = [{"type": "text", "text": prompt}]
+        for _, b64, _, _ in group:
+            content.append(
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
+                }
+            )
 
         requests_data.append(
             {
-                "custom_id": f"img-{idx:05d}",
+                "custom_id": f"group-{group_idx:05d}",
                 "method": "POST",
                 "url": "/v1/chat/completions",
                 "body": {
                     "model": model_full,
-                    "messages": [
-                        {
-                            "role": "user",
-                            "content": [
-                                {"type": "text", "text": prompt},
-                                {
-                                    "type": "image_url",
-                                    "image_url": {
-                                        "url": f"data:image/jpeg;base64,{b64}"
-                                    },
-                                },
-                            ],
-                        }
-                    ],
+                    "messages": [{"role": "user", "content": content}],
                 },
             }
         )
 
-    click.echo(f"Built {len(requests_data)} requests ({skipped} images skipped)")
+    click.echo(
+        f"Built {len(requests_data)} requests ({IMAGES_PER_REQUEST} images each)"
+    )
 
-    # Write batch file
-    batch_file = output_dir / f"batch_{model_short}.jsonl"
-    create_batch_file(requests_data, batch_file)
-    click.echo(f"Created {batch_file}")
+    # Split requests across NUM_BATCH_FILES files
+    requests_per_file = math.ceil(len(requests_data) / NUM_BATCH_FILES)
+    batch_files = []
+    for file_idx in range(NUM_BATCH_FILES):
+        chunk = requests_data[
+            file_idx * requests_per_file : (file_idx + 1) * requests_per_file
+        ]
+        if not chunk:
+            break
+        batch_file = output_dir / f"batch_{model_short}_{file_idx:02d}.jsonl"
+        create_batch_file(chunk, batch_file)
+        size_mb = batch_file.stat().st_size / (1024 * 1024)
+        batch_files.append(batch_file)
+        click.echo(f"Created {batch_file} ({size_mb:.1f} MB, {len(chunk)} requests)")
+
+    click.echo(f"Created {len(batch_files)} batch files")
 
     if dry_run:
         click.echo("Dry run - skipping submission")
         return
 
-    # Submit batch
+    # Submit each batch file
     client = get_client()
-    click.echo("Uploading batch file...")
-    file_id = upload_batch_file(client, batch_file)
-    click.echo(f"File ID: {file_id}")
+    all_batch_info = []
+    for file_idx, batch_file in enumerate(batch_files):
+        click.echo(f"\nUploading batch file {file_idx + 1}/{len(batch_files)}...")
+        file_id = upload_batch_file(client, batch_file)
+        click.echo(f"File ID: {file_id}")
 
-    click.echo("Creating batch...")
-    batch_id = create_batch(client, file_id)
-    click.echo(f"Batch ID: {batch_id}")
+        click.echo("Creating batch...")
+        batch_id = create_batch(client, file_id)
+        click.echo(f"Batch ID: {batch_id}")
 
-    # Save batch info
-    batch_info = {
-        "batch_id": batch_id,
-        "file_id": file_id,
-        "model": model_full,
-        "model_short": model_short,
-    }
-    info_path = output_dir / f"batch_{model_short}_info.json"
-    with open(info_path, "w") as f:
-        json.dump(batch_info, f, indent=2)
+        batch_info = {
+            "batch_id": batch_id,
+            "file_id": file_id,
+            "model": model_full,
+            "model_short": f"{model_short}_{file_idx:02d}",
+        }
+        all_batch_info.append(batch_info)
 
-    click.echo(f"Batch submitted. Run 'image-summarization status' to check progress.")
+        info_path = output_dir / f"batch_{model_short}_{file_idx:02d}_info.json"
+        with open(info_path, "w") as f:
+            json.dump(batch_info, f, indent=2)
+
+    click.echo(
+        f"\nSubmitted {len(all_batch_info)} batches. Run 'image-summarization status' to check progress."
+    )
 
 
 @cli.command()

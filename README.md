@@ -113,7 +113,7 @@ example-name/
 ├── README.md          # Results, methodology, replication instructions
 ├── pyproject.toml     # Python dependencies and CLI entry point
 ├── src/
-│   ├── cli.py         # Click CLI with prepare/analyze commands
+│   ├── cli.py         # Click CLI (prepare, analyze, run, etc.)
 │   └── ...            # Task-specific modules
 └── results/           # Output artifacts (gitignored)
 ```

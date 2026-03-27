@@ -67,14 +67,12 @@ def download_cvefixes(output_dir: str, progress: bool = True) -> Path:
 
     click.echo("Extracting database...")
     with zipfile.ZipFile(zip_path, 'r') as zf:
-        # Find the .db file in the archive
+        # Find the .db file in the archive (may be nested in a subdirectory)
         for name in zf.namelist():
             if name.endswith('.db'):
-                # Extract to output_dir
-                zf.extract(name, output_path)
-                extracted_path = output_path / name
-                if extracted_path != db_path:
-                    extracted_path.rename(db_path)
+                with zf.open(name) as src, open(db_path, 'wb') as dst:
+                    import shutil
+                    shutil.copyfileobj(src, dst)
                 break
 
     # Clean up zip

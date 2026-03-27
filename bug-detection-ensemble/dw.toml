@@ -3,28 +3,19 @@ name = "bug-detection-ensemble"
 setup = "uv sync"
 workflow = [
     "dw project setup",
-    "# Download CVEfixes database (~2GB): uv run bug-ensemble fetch-cvefixes",
-    "dw project run prepare -- -m Qwen/Qwen3-VL-30B-A3B-Instruct-FP8",
-    "dw project run classify-status",
-    "dw project run classify-analyze",
+    "dw project run prepare",
+    "dw files stats batches/classify.jsonl",
+    "dw files prepare batches/classify.jsonl --model Qwen/Qwen3-VL-30B-A3B-Instruct-FP8",
+    "dw batches run batches/classify.jsonl --watch --output-id .batch-id",
+    "dw batches results $(cat .batch-id) -o results/classify.jsonl",
+    "dw project run analyze -- -r results/classify.jsonl",
+    "dw batches analytics $(cat .batch-id)",
 ]
 
 [steps.prepare]
-description = "Download dataset and run CWE classification batch"
+description = "Load CVEfixes dataset and generate classification batch JSONL"
 run = "uv run bug-ensemble classify"
 
-[steps.classify-status]
-description = "Check batch status and download results"
-run = "uv run bug-ensemble status -o results/classify --wait"
-
-[steps.classify-analyze]
-description = "Analyze classification results"
-run = "uv run bug-ensemble classify-analyze"
-
-[steps.scan]
-description = "Run vulnerability scanning batch (alternative to classify)"
-run = "uv run bug-ensemble scan"
-
 [steps.analyze]
-description = "Analyze scanning results across models"
-run = "uv run bug-ensemble analyze"
+description = "Analyze CWE classification results"
+run = "uv run bug-ensemble classify-analyze"

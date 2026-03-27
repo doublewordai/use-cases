@@ -247,7 +247,7 @@ class AgentRegistry:
                     "messages": messages,
                     "tools": tools,
                     "temperature": 0,
-                    "max_tokens": 8192 if agent.is_root else 4096,
+                    "max_tokens": 16384 if agent.is_root else 4096,
                 }
             )
             agent.status = "in_progress"
@@ -405,7 +405,7 @@ class AgentRegistry:
                 "model": root.model,
                 "messages": messages,
                 "temperature": 0,
-                "max_tokens": 8192,
+                "max_tokens": 16384,
             }
         ]
 
@@ -467,7 +467,12 @@ def process_responses(registry: AgentRegistry, results: dict[str, dict]) -> None
             agent.status = "completed"
             agent.iteration += 1
 
-        elif finish_reason in ("tool_calls", "function_call"):
+        elif finish_reason in ("tool_calls", "function_call") or (
+            "tool_calls" in message and message["tool_calls"]
+        ):
+            # Accept tool calls even if finish_reason is "length" — the model
+            # may have hit the token limit while generating tool arguments
+            # (e.g., a long write_report) but the tool call is still usable.
             assistant_msg = {"role": "assistant", "content": message.get("content")}
             if "tool_calls" in message:
                 assistant_msg["tool_calls"] = message["tool_calls"]

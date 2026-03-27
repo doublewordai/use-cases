@@ -6,6 +6,7 @@ see the README for the full workflow.
 """
 
 import json
+import sys
 from pathlib import Path
 
 import click
@@ -114,25 +115,39 @@ def build_index_cmd(results: str, documents: str, output: str):
     if dim is None:
         raise click.ClickException("No valid embedding results found — cannot determine dimension.")
 
-    # Extract embeddings in order, filling missing with zeros at the correct dimension
+    # Extract embeddings in order, filling missing/errored with zeros
     embeddings = []
     missing = 0
+    errors = 0
     for i in range(len(docs)):
         key = f"emb-{i:06d}"
-        if key in batch_results:
-            rb = batch_results[key].get("response_body") or batch_results[key].get("response", {}).get("body", {})
-            emb = rb["data"][0]["embedding"]
-            if len(emb) != dim:
-                raise click.ClickException(
-                    f"Dimension mismatch at {key}: expected {dim}, got {len(emb)}"
-                )
-            embeddings.append(emb)
-        else:
+        if key not in batch_results:
             missing += 1
             embeddings.append([0.0] * dim)
+            continue
 
-    if missing > 0:
-        click.echo(f"Warning: {missing} missing embeddings (filled with zeros)")
+        obj = batch_results[key]
+        if obj.get("error"):
+            errors += 1
+            embeddings.append([0.0] * dim)
+            continue
+
+        rb = obj.get("response_body") or obj.get("response", {}).get("body", {})
+        data = rb.get("data", [])
+        if not data or "embedding" not in data[0]:
+            errors += 1
+            embeddings.append([0.0] * dim)
+            continue
+
+        emb = data[0]["embedding"]
+        if len(emb) != dim:
+            raise click.ClickException(
+                f"Dimension mismatch at {key}: expected {dim}, got {len(emb)}"
+            )
+        embeddings.append(emb)
+
+    if missing > 0 or errors > 0:
+        click.echo(f"Warning: {missing} missing, {errors} errored embeddings (filled with zeros)")
 
     click.echo(f"Building HNSW index (dim={dim}, {len(embeddings)} vectors)...")
     index = build_index(embeddings, dim=dim)
@@ -232,24 +247,15 @@ def search_cmd(query: str, results_dir: str, top_k: int):
 
 
 def main():
-    exit_code = 0
     try:
-        cli(standalone_mode=False)
-    except SystemExit as e:
-        exit_code = e.code if isinstance(e.code, int) else 1
-    except click.ClickException as e:
-        e.show()
-        exit_code = e.exit_code
-    except Exception as e:
-        click.echo(f"Error: {e}", err=True)
-        exit_code = 1
+        cli()
     finally:
-        # The HuggingFace datasets library spawns background threads that
-        # block normal shutdown. Force exit after the CLI completes, but
-        # preserve the real exit code.
-        import os
-
-        os._exit(exit_code)
+        # The HuggingFace `datasets` library spawns background threads that
+        # prevent clean shutdown. Only force-exit if datasets was imported
+        # (i.e., the prepare command was run). Other commands exit normally.
+        if "datasets" in sys.modules:
+            import os
+            os._exit(0)
 
 
 if __name__ == "__main__":

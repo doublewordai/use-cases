@@ -111,42 +111,48 @@ Download the CVEfixes database (~2GB SQLite):
 uv run bug-ensemble fetch-cvefixes
 ```
 
-Run classification (submits a batch via the Doubleword API):
+Generate the classification batch JSONL:
 
 ```bash
-dw project run prepare -- -m Qwen/Qwen3-VL-30B-A3B-Instruct-FP8
+dw project run prepare
 ```
 
-For calibration, run twice:
+Inspect and set the model:
 
 ```bash
-uv run bug-ensemble classify -m Qwen/Qwen3-VL-30B-A3B-Instruct-FP8 -o results/run2
+dw files stats batches/classify.jsonl
+dw files prepare batches/classify.jsonl --model Qwen/Qwen3-VL-30B-A3B-Instruct-FP8
 ```
 
-Check batch status and download results:
+Submit the batch and watch progress:
 
 ```bash
-dw project run classify-status
+dw batches run batches/classify.jsonl --watch --output-id .batch-id
 ```
 
-Analyze results:
+Download results and analyze:
 
 ```bash
-dw project run classify-analyze
+dw batches results $(cat .batch-id) -o results/classify.jsonl
+dw project run analyze -- -r results/classify.jsonl
 ```
 
-Check overall usage:
+Check what it cost:
 
 ```bash
-dw usage --since $(date +%Y-%m-%d)
+dw batches analytics $(cat .batch-id)
 ```
 
-### Available Models
+#### Calibration: run twice
 
-| Alias | Model |
-|-------|-------|
-| `30b` | Qwen3-30B-A3B-Instruct |
-| `235b` | Qwen3-235B-A22B-Instruct |
+At \$0.40 per run, you can run the same classification twice and use agreement as a confidence signal. Submit a second batch from the same JSONL:
+
+```bash
+dw batches run batches/classify.jsonl --watch --output-id .batch-id-run2
+dw batches results $(cat .batch-id-run2) -o results/classify-run2.jsonl
+```
+
+When both runs agree on a classification, accuracy jumps to 66%. When they disagree, flag for manual review. See the [Calibration](#calibration-run-twice) section above for details.
 
 ### Customizing Categories
 

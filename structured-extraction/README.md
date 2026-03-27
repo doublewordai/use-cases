@@ -104,24 +104,25 @@ Generate the extraction batch JSONL (dry run — creates files but doesn't submi
 dw project run prepare -- -i data/sroie/receipts.jsonl -m Qwen/Qwen3-VL-30B-A3B-Instruct-FP8 -n 1
 ```
 
-The `-m Qwen/Qwen3-VL-30B-A3B-Instruct-FP8` flag selects Qwen3-VL-30B. Use `-m 235b` for maximum accuracy, or `-m Qwen/Qwen3-VL-30B-A3B-Instruct-FP8,235b` to run both.
+The `-m Qwen/Qwen3-VL-30B-A3B-Instruct-FP8` flag selects Qwen3-VL-30B. Use `-m Qwen/Qwen3-VL-235B-A22B-Instruct-FP8` for maximum accuracy.
 
-Submit the batch and stream results:
+Submit the batch and watch progress:
 
 ```bash
-dw stream results/batch_30b_n1.jsonl > results/results_30b_n1.jsonl
+dw batches run batches/batch_30b_n1.jsonl --watch --output-id .batch-id
 ```
 
-Analyze accuracy against ground truth:
+Download results and analyze accuracy:
 
 ```bash
+dw batches results $(cat .batch-id) -o results/results.jsonl
 dw project run analyze -- -i data/sroie/receipts.jsonl -r results/
 ```
 
-Check what it cost (the batch ID is printed by `dw stream`):
+Check what it cost:
 
 ```bash
-dw batches analytics <batch-id>
+dw batches analytics $(cat .batch-id)
 ```
 
 ### Comparing with OpenAI

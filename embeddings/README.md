@@ -134,15 +134,16 @@ dw files stats batches/batch.jsonl
 dw files prepare batches/batch.jsonl --model Qwen/Qwen3-Embedding-8B
 ```
 
-Submit and stream results:
+Submit the batch and watch progress:
 
 ```bash
-dw stream batches/batch.jsonl > results/embeddings.jsonl
+dw batches run batches/batch.jsonl --watch --output-id .batch-id
 ```
 
-Build the search index from the results:
+Download results and build the search index:
 
 ```bash
+dw batches results $(cat .batch-id) -o results/embeddings.jsonl
 dw project run build-index -- -r results/embeddings.jsonl
 ```
 
@@ -152,10 +153,10 @@ Search:
 dw project run search -- -q "how do black holes form"
 ```
 
-Check what it cost (the batch ID is printed by `dw stream`):
+Check what it cost:
 
 ```bash
-dw batches analytics <batch-id>
+dw batches analytics $(cat .batch-id)
 ```
 
 #### Sample first, then scale

@@ -270,7 +270,12 @@ def prepare(input_path: str, output_dir: str, num_images: int):
     type=int,
     help="Number of images (must match the prepare run)",
 )
-def analyze(input_path: str, results: str, output_file: str, num_images: int):
+@click.option(
+    "--mapping",
+    default="batches/image_mapping.json",
+    help="Image mapping file from prepare step",
+)
+def analyze(input_path: str, results: str, output_file: str, num_images: int, mapping: str):
     """Parse results and create a CSV of image summaries."""
     results_path = Path(results)
     output_path = Path(output_file)
@@ -333,15 +338,7 @@ def analyze(input_path: str, results: str, output_file: str, num_images: int):
         return parts[:expected]
 
     # Load image mapping from prepare step
-    mapping_path = Path(input_path).parent / ".." / "batches" / "image_mapping.json"
-    # Try a few reasonable locations
-    for candidate in [
-        Path("batches/image_mapping.json"),
-        Path(input_path).parent / "image_mapping.json",
-    ]:
-        if candidate.exists():
-            mapping_path = candidate
-            break
+    mapping_path = Path(mapping)
 
     if mapping_path.exists():
         with open(mapping_path) as f:

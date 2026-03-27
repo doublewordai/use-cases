@@ -124,31 +124,23 @@ dw files stats batches/batch.jsonl
 dw files prepare batches/batch.jsonl --model Qwen/Qwen3-VL-235B-A22B-Instruct-FP8
 ```
 
-Submit the batch and stream results as they complete:
+Submit the batch and watch progress:
 
 ```bash
-dw stream batches/batch.jsonl > results.jsonl
+dw batches run batches/batch.jsonl --watch --output-id .batch-id
 ```
 
-Or do it step by step with progress watching:
+Download results and score against ground truth:
 
 ```bash
-dw files upload batches/batch.jsonl
-dw batches create --file <file-id>
-dw batches watch <batch-id>
-dw batches results <batch-id> -o results.jsonl
+dw batches results $(cat .batch-id) -o results/results.jsonl
+dw project run analyze -- -r results/results.jsonl
 ```
 
-Score the results against ground truth:
+Check what it cost:
 
 ```bash
-dw project run analyze -- -r results.jsonl
-```
-
-Check what the run cost (the batch ID is printed by `dw stream`):
-
-```bash
-dw batches analytics <batch-id>
+dw batches analytics $(cat .batch-id)
 ```
 
 #### Model comparison

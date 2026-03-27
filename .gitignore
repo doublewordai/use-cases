@@ -3,12 +3,14 @@
 */output/
 */batches/
 */results/
+*/results*.jsonl
 
 # dw project run state
 */.dw-run.json
 */.dw-run.json.tmp
 */.dw-run.json.bak
 */.batch-id
+*/.batch-id-*
 
 # Dataset compilation intermediate/output files
 dataset-compilation/.companies_*

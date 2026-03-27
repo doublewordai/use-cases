@@ -61,17 +61,15 @@ def cli():
               help="Dataset to load samples from")
 @click.option("--max-samples", "-n", default=1000, type=int,
               help="Maximum samples to scan")
-@click.option("--model", "-m", default=DEFAULT_MODEL,
-              help=f"Model to use. Aliases: {', '.join(MODELS.keys())}")
-@click.option("--output", "-o", default="results", help="Output directory")
-@click.option("--window", "-w", default="24h", help="Batch completion window (1h or 24h)")
-def scan(dataset: str, max_samples: int, model: str, output: str, window: str):
-    """Scan code samples for vulnerabilities using batch API."""
+@click.option("--output", "-o", default="batches", help="Output directory for batch JSONL")
+def scan(dataset: str, max_samples: int, output: str):
+    """Load dataset and generate scan batch JSONL.
+
+    The output file includes model in each request line. Submit with
+    `dw stream` or `dw batches run`, then analyze with `bug-ensemble analyze`.
+    """
     output_dir = Path(output)
     output_dir.mkdir(parents=True, exist_ok=True)
-
-    resolved_model = resolve_model(model)
-    model_tag = model.replace("/", "_").replace(".", "_")
 
     # Load samples
     if dataset == "cvefixes":
@@ -80,7 +78,7 @@ def scan(dataset: str, max_samples: int, model: str, output: str, window: str):
         if not db_path.exists():
             raise click.ClickException(
                 f"CVEfixes database not found: {db_path}\n"
-                "Run: bug-ensemble fetch-cvefixes to download"
+                "Run: uv run bug-ensemble fetch-cvefixes to download"
             )
         samples = load_cvefixes(db_path, max_samples=max_samples, strip_comments=True)
     elif dataset == "juliet":
@@ -106,61 +104,29 @@ def scan(dataset: str, max_samples: int, model: str, output: str, window: str):
 
         requests_list.append({
             "custom_id": short_id,
-            "model": resolved_model,
-            "messages": [{"role": "user", "content": SCAN_PROMPT.format(code=sample["code"])}],
-            "temperature": 0.0,
+            "method": "POST",
+            "url": "/v1/chat/completions",
+            "body": {
+                "messages": [{"role": "user", "content": SCAN_PROMPT.format(code=sample["code"])}],
+                "temperature": 0.0,
+            },
         })
 
-    # Save samples for later analysis
-    samples_path = output_dir / f"samples_{model_tag}.json"
+    # Save samples and mapping for later analysis
+    samples_path = output_dir / "samples.json"
     with open(samples_path, "w") as f:
         json.dump(samples, f, indent=2)
 
-    # Save ID mapping
-    mapping_path = output_dir / f"id_mapping_{model_tag}.json"
+    mapping_path = output_dir / "id_mapping.json"
     with open(mapping_path, "w") as f:
         json.dump(id_mapping, f, indent=2)
 
-    # Create batch file
-    batch_path = output_dir / f"batch_input_{model_tag}.jsonl"
+    # Write batch JSONL (model intentionally omitted — set with dw files prepare)
+    batch_path = output_dir / "scan.jsonl"
     create_batch_file(requests_list, batch_path)
-    click.echo(f"Created batch file: {batch_path} ({len(requests_list)} requests)")
-
-    # Determine provider
-    if is_openai_model(model):
-        client = get_openai_client()
-        provider = "openai"
-    else:
-        client = get_doubleword_client()
-        provider = "doubleword"
-
-    click.echo(f"Using {provider} API with model {resolved_model}")
-
-    # Upload and create batch
-    click.echo("Uploading batch file...")
-    file_id = upload_batch_file(client, batch_path)
-    click.echo(f"File ID: {file_id}")
-
-    click.echo(f"Creating batch with {window} window...")
-    batch_id = create_batch(client, file_id, window)
-    click.echo(f"Batch ID: {batch_id}")
-
-    # Save batch info
-    batch_info = {
-        "batch_id": batch_id,
-        "file_id": file_id,
-        "model": resolved_model,
-        "model_alias": model,
-        "provider": provider,
-        "samples_count": len(samples),
-        "dataset": dataset,
-    }
-    batch_info_path = output_dir / f"batch_info_{model_tag}.json"
-    with open(batch_info_path, "w") as f:
-        json.dump(batch_info, f, indent=2)
-
-    click.echo(f"\nBatch submitted. Check status with:")
-    click.echo(f"  bug-ensemble status -o {output} -m {model}")
+    click.echo(f"Created {batch_path} ({len(requests_list)} requests)")
+    click.echo(f"Samples saved to {samples_path}")
+    click.echo(f"\nNext: dw files prepare {batch_path} --model <model>")
 
 
 @cli.command()
@@ -584,12 +550,13 @@ def ensemble_prepare(output: str, model: str, samples_file: str, prompt_subset: 
 @cli.command()
 @click.option("--max-per-cwe", "-n", default=None, type=int,
               help="Maximum samples per CWE class (default: all)")
-@click.option("--model", "-m", default=DEFAULT_MODEL,
-              help=f"Model to use. Aliases: {', '.join(MODELS.keys())}")
-@click.option("--output", "-o", default="results/classify", help="Output directory")
-@click.option("--window", "-w", default="24h", help="Batch completion window")
-def classify(max_per_cwe: int | None, model: str, output: str, window: str):
-    """Classify vulnerable code into CWE categories."""
+@click.option("--output", "-o", default="batches", help="Output directory for batch JSONL")
+def classify(max_per_cwe: int | None, output: str):
+    """Load dataset and generate CWE classification batch JSONL.
+
+    The output file has no model set — use `dw files prepare --model <name>`
+    to set the model before submitting with `dw stream` or `dw batches run`.
+    """
     from .classify import (
         CWE_CLASSES,
         load_classification_samples,
@@ -599,13 +566,13 @@ def classify(max_per_cwe: int | None, model: str, output: str, window: str):
     output_dir = Path(output)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    resolved_model = resolve_model(model)
-    model_tag = model.replace("/", "_").replace(".", "_")
-
     # Load samples
     db_path = Path("data/CVEfixes.db")
     if not db_path.exists():
-        raise click.ClickException(f"CVEfixes database not found: {db_path}")
+        raise click.ClickException(
+            f"CVEfixes database not found: {db_path}\n"
+            "Run: uv run bug-ensemble fetch-cvefixes to download"
+        )
 
     samples = load_classification_samples(db_path, max_per_cwe=max_per_cwe)
     click.echo(f"Loaded {len(samples)} samples across {len(CWE_CLASSES)} CWE classes")
@@ -627,61 +594,29 @@ def classify(max_per_cwe: int | None, model: str, output: str, window: str):
         prompt = format_classification_prompt(sample["code"])
         requests_list.append({
             "custom_id": short_id,
-            "model": resolved_model,
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.0,
+            "method": "POST",
+            "url": "/v1/chat/completions",
+            "body": {
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.0,
+            },
         })
 
-    # Save samples for later analysis
-    samples_path = output_dir / f"samples_{model_tag}.json"
+    # Save samples and mapping for later analysis
+    samples_path = output_dir / "samples.json"
     with open(samples_path, "w") as f:
         json.dump(samples, f, indent=2)
 
-    # Save ID mapping
-    mapping_path = output_dir / f"id_mapping_{model_tag}.json"
+    mapping_path = output_dir / "id_mapping.json"
     with open(mapping_path, "w") as f:
         json.dump(id_mapping, f, indent=2)
 
-    # Create batch file
-    batch_path = output_dir / f"batch_input_{model_tag}.jsonl"
+    # Write batch JSONL (model intentionally omitted — set with dw files prepare)
+    batch_path = output_dir / "classify.jsonl"
     create_batch_file(requests_list, batch_path)
-    click.echo(f"Created batch file: {batch_path} ({len(requests_list)} requests)")
-
-    # Determine provider
-    if is_openai_model(model):
-        client = get_openai_client()
-        provider = "openai"
-    else:
-        client = get_doubleword_client()
-        provider = "doubleword"
-
-    click.echo(f"Using {provider} API with model {resolved_model}")
-
-    # Upload and create batch
-    click.echo("Uploading batch file...")
-    file_id = upload_batch_file(client, batch_path)
-    click.echo(f"File ID: {file_id}")
-
-    click.echo(f"Creating batch with {window} window...")
-    batch_id = create_batch(client, file_id, window)
-    click.echo(f"Batch ID: {batch_id}")
-
-    # Save batch info
-    batch_info = {
-        "batch_id": batch_id,
-        "file_id": file_id,
-        "model": resolved_model,
-        "model_alias": model,
-        "provider": provider,
-        "samples_count": len(samples),
-        "task": "classification",
-    }
-    batch_info_path = output_dir / f"batch_info_{model_tag}.json"
-    with open(batch_info_path, "w") as f:
-        json.dump(batch_info, f, indent=2)
-
-    click.echo(f"\nBatch submitted. Check status with:")
-    click.echo(f"  bug-ensemble status -o {output} -m {model}")
+    click.echo(f"Created {batch_path} ({len(requests_list)} requests)")
+    click.echo(f"Samples saved to {samples_path}")
+    click.echo(f"\nNext: dw files prepare {batch_path} --model <model>")
 
 
 @cli.command("classify-realtime")
@@ -791,15 +726,59 @@ def classify_realtime(max_per_cwe: int | None, model: str, output: str, concurre
 
 
 @cli.command("classify-analyze")
-@click.option("--output", "-o", default="results/classify", help="Results directory")
-@click.option("--model", "-m", default=None, help="Model to analyze (default: all)")
-def classify_analyze(output: str, model: str):
+@click.option("--results", "-r", default=None,
+              help="Results JSONL file (from `dw batches results`)")
+@click.option("--output", "-o", default="results/classify", help="Results directory (legacy)")
+@click.option("--samples", "-s", default="batches/samples.json",
+              help="Samples JSON file from prepare step")
+@click.option("--mapping", default="batches/id_mapping.json",
+              help="ID mapping JSON file from prepare step")
+def classify_analyze(results: str | None, output: str, samples: str, mapping: str):
     """Analyze CWE classification results."""
     from .classify import CWE_CLASSES, analyze_classification_results
 
+    # If --results is provided, use it directly with the samples/mapping from prepare
+    if results:
+        results_path = Path(results)
+        if not results_path.exists():
+            raise click.ClickException(f"Results file not found: {results_path}")
+        samples_path = Path(samples)
+        mapping_path = Path(mapping)
+        if not samples_path.exists():
+            raise click.ClickException(f"Samples file not found: {samples_path}")
+        if not mapping_path.exists():
+            raise click.ClickException(f"Mapping file not found: {mapping_path}")
+
+        with open(samples_path) as f:
+            samples_data = json.load(f)
+        with open(mapping_path) as f:
+            id_mapping = json.load(f)
+
+        analysis = analyze_classification_results(results_path, samples_data, id_mapping)
+
+        click.echo(f"\n{'=' * 60}")
+        click.echo(f"CWE CLASSIFICATION RESULTS")
+        click.echo(f"{'=' * 60}")
+
+        click.echo(f"\nFine-grained (24 classes): {analysis['accuracy']:.1%} ({analysis['correct']}/{analysis['total']})")
+        click.echo(f"Grouped (8 categories):    {analysis['grouped_accuracy']:.1%} ({analysis['grouped_correct']}/{analysis['total']})")
+
+        click.echo(f"\n{'Group':<18} {'Accuracy':>10} {'Support':>10}")
+        click.echo("-" * 40)
+        for group_name, metrics in sorted(analysis.get('per_group', {}).items(), key=lambda x: -x[1]['accuracy']):
+            click.echo(f"{group_name:<18} {metrics['accuracy']:>9.1%} {metrics['support']:>10}")
+
+        analysis_path = Path(output)
+        analysis_path.mkdir(parents=True, exist_ok=True)
+        with open(analysis_path / "analysis.json", "w") as f:
+            json.dump(analysis, f, indent=2)
+        click.echo(f"\nAnalysis saved to {analysis_path / 'analysis.json'}")
+        return
+
     output_dir = Path(output)
 
-    # Find result files
+    # Legacy: find result files by model tag pattern
+    model = None
     if model:
         model_tag = model.replace("/", "_").replace(".", "_")
         model_tags = [model_tag]

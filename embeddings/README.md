@@ -104,6 +104,12 @@ The key insight for batch embedding is that all documents are independent. The e
 
 ### Using the Doubleword CLI
 
+Install the [dw CLI](https://github.com/doublewordai/dw) and log in:
+
+```bash
+dw login
+```
+
 Clone, setup, and see the full workflow:
 
 ```bash
@@ -166,16 +172,8 @@ For a quick test before embedding the full corpus:
 ```bash
 dw files sample batches/batch.jsonl -n 100 -o batches/sample.jsonl
 dw files prepare batches/sample.jsonl --model Qwen/Qwen3-Embedding-8B
-dw stream batches/sample.jsonl > results/sample.jsonl
-```
-
-### Alternative: Python SDK directly
-
-```bash
-cd embeddings && uv sync
-export DOUBLEWORD_API_KEY="your-key"
-uv run embeddings prepare --limit 10000
-# Then use dw stream for submission, or modify the code to use the OpenAI SDK directly
+dw batches run batches/sample.jsonl --watch --output-id .batch-id
+dw batches results $(cat .batch-id) -o results/sample.jsonl
 ```
 
 The `results/` directory contains the raw embeddings, the built HNSW index, and search metadata.

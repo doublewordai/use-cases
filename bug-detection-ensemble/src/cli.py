@@ -112,12 +112,12 @@ def scan(dataset: str, max_samples: int, output: str):
             },
         })
 
-    # Save samples and mapping for later analysis
-    samples_path = output_dir / "samples.json"
+    # Save samples and mapping for later analysis (prefixed to avoid collision with classify)
+    samples_path = output_dir / "scan_samples.json"
     with open(samples_path, "w") as f:
         json.dump(samples, f, indent=2)
 
-    mapping_path = output_dir / "id_mapping.json"
+    mapping_path = output_dir / "scan_id_mapping.json"
     with open(mapping_path, "w") as f:
         json.dump(id_mapping, f, indent=2)
 
@@ -602,12 +602,12 @@ def classify(max_per_cwe: int | None, output: str):
             },
         })
 
-    # Save samples and mapping for later analysis
-    samples_path = output_dir / "samples.json"
+    # Save samples and mapping for later analysis (prefixed to avoid collision with scan)
+    samples_path = output_dir / "classify_samples.json"
     with open(samples_path, "w") as f:
         json.dump(samples, f, indent=2)
 
-    mapping_path = output_dir / "id_mapping.json"
+    mapping_path = output_dir / "classify_id_mapping.json"
     with open(mapping_path, "w") as f:
         json.dump(id_mapping, f, indent=2)
 
@@ -729,9 +729,9 @@ def classify_realtime(max_per_cwe: int | None, model: str, output: str, concurre
 @click.option("--results", "-r", default=None,
               help="Results JSONL file (from `dw batches results`)")
 @click.option("--output", "-o", default="results/classify", help="Results directory (legacy)")
-@click.option("--samples", "-s", default="batches/samples.json",
+@click.option("--samples", "-s", default="batches/classify_samples.json",
               help="Samples JSON file from prepare step")
-@click.option("--mapping", default="batches/id_mapping.json",
+@click.option("--mapping", default="batches/classify_id_mapping.json",
               help="ID mapping JSON file from prepare step")
 def classify_analyze(results: str | None, output: str, samples: str, mapping: str):
     """Analyze CWE classification results."""

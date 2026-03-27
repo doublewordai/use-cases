@@ -188,8 +188,9 @@ def build_index_cmd(results: str, documents: str, output: str):
 def search_cmd(query: str, results_dir: str, top_k: int):
     """Search the embedded document corpus.
 
-    Uses `dw realtime` for the query embedding via the inference API.
-    Requires DOUBLEWORD_API_KEY in environment.
+    Embeds the query via the Doubleword inference API using the same model
+    that was used for the corpus. Requires DOUBLEWORD_API_KEY in environment
+    (automatically set by `dw project run`).
     """
     import os
 
@@ -223,7 +224,7 @@ def search_cmd(query: str, results_dir: str, top_k: int):
     if not model:
         raise click.ClickException(
             "No model recorded in index metadata. Rebuild the index from results "
-            "that include model info, or pass the model manually."
+            "that include model info (the model is extracted from the batch response)."
         )
 
     client = OpenAI(base_url="https://api.doubleword.ai/v1", api_key=api_key)

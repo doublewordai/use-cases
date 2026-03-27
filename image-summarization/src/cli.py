@@ -193,6 +193,8 @@ def prepare(input_path: str, output_dir: str, num_images: int):
                 "url": "/v1/chat/completions",
                 "body": {
                     "messages": [{"role": "user", "content": content}],
+                    "temperature": 0,
+                    "max_tokens": 2048,
                 },
             }
         )

@@ -152,15 +152,18 @@ To compare multiple models on the same questions:
 dw files prepare batches/batch.jsonl --model Qwen/Qwen3-VL-30B-A3B-Instruct-FP8 --output-file batches/batch-30b.jsonl
 dw files prepare batches/batch.jsonl --model Qwen/Qwen3-VL-235B-A22B-Instruct-FP8 --output-file batches/batch-235b.jsonl
 
-# Run both in parallel
-dw stream batches/batch-30b.jsonl > results-30b.jsonl &
-dw stream batches/batch-235b.jsonl > results-235b.jsonl &
-wait
+# Run both
+dw batches run batches/batch-30b.jsonl --watch --output-id .batch-id-30b
+dw batches run batches/batch-235b.jsonl --watch --output-id .batch-id-235b
+
+# Download results
+dw batches results $(cat .batch-id-30b) -o results/results-30b.jsonl
+dw batches results $(cat .batch-id-235b) -o results/results-235b.jsonl
 
 # Compare
-dw files diff results-30b.jsonl results-235b.jsonl
-dw project run analyze -- -r results-30b.jsonl
-dw project run analyze -- -r results-235b.jsonl
+dw files diff results/results-30b.jsonl results/results-235b.jsonl
+dw project run analyze -- -r results/results-30b.jsonl
+dw project run analyze -- -r results/results-235b.jsonl
 ```
 
 ## Limitations

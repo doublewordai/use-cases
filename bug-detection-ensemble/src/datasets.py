@@ -99,6 +99,7 @@ def download_cvefixes(output_dir: str, progress: bool = True) -> Path:
 
     # Stream the gzipped SQL line by line to avoid loading ~10GB into memory
     statement = []
+    skipped = 0
     with gzip.open(sql_gz_path, 'rt', errors='replace') as gz:
         for line in gz:
             stripped = line.strip()
@@ -109,12 +110,20 @@ def download_cvefixes(output_dir: str, progress: bool = True) -> Path:
                 sql = ''.join(statement)
                 try:
                     conn.executescript(sql)
-                except sqlite3.Error:
-                    pass  # Skip MySQL-specific statements that SQLite can't handle
+                except sqlite3.Error as e:
+                    # Fail on structural statements — these must succeed
+                    if sql.strip().upper().startswith(('CREATE TABLE', 'CREATE INDEX')):
+                        conn.close()
+                        db_path.unlink(missing_ok=True)
+                        raise click.ClickException(f"Failed on DDL statement: {e}")
+                    skipped += 1
                 statement = []
 
     conn.commit()
     conn.close()
+
+    if skipped > 0:
+        click.echo(f"  Skipped {skipped} incompatible statements")
 
     # Verify the database was created successfully before cleaning up
     if db_path.stat().st_size == 0:

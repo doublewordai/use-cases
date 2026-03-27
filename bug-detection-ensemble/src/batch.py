@@ -82,10 +82,13 @@ def create_batch_file(requests_list: list[dict], output_path: Path) -> Path:
     with open(output_path, "w") as f:
         for i, req in enumerate(requests_list):
             if "body" in req:
-                # Pre-formatted batch request — write as-is
+                # Pre-formatted batch request — ensure response_format for JSON parsing
                 line = dict(req)
                 if "custom_id" not in line:
                     line["custom_id"] = f"req-{i:06d}"
+                body = line.get("body", {})
+                if "messages" in body and "response_format" not in body:
+                    line["body"] = {**body, "response_format": {"type": "json_object"}}
             else:
                 # Legacy format — wrap into batch request structure
                 body = {

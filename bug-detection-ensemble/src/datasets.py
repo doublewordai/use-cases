@@ -120,10 +120,26 @@ def download_cvefixes(output_dir: str, progress: bool = True) -> Path:
                 statement = []
 
     conn.commit()
-    conn.close()
 
     if skipped > 0:
         click.echo(f"  Skipped {skipped} incompatible statements")
+
+    # Add indexes for the queries used by classify and scan commands
+    click.echo("  Creating indexes...")
+    for idx_sql in [
+        "CREATE INDEX IF NOT EXISTS idx_method_change_file ON method_change(file_change_id)",
+        "CREATE INDEX IF NOT EXISTS idx_method_change_before ON method_change(before_change)",
+        "CREATE INDEX IF NOT EXISTS idx_file_change_hash ON file_change(hash)",
+        "CREATE INDEX IF NOT EXISTS idx_file_change_id ON file_change(file_change_id)",
+        "CREATE INDEX IF NOT EXISTS idx_commits_hash ON commits(hash)",
+        "CREATE INDEX IF NOT EXISTS idx_fixes_hash ON fixes(hash)",
+        "CREATE INDEX IF NOT EXISTS idx_fixes_cve ON fixes(cve_id)",
+        "CREATE INDEX IF NOT EXISTS idx_cwe_class_cve ON cwe_classification(cve_id)",
+        "CREATE INDEX IF NOT EXISTS idx_cwe_class_cwe ON cwe_classification(cwe_id)",
+    ]:
+        conn.execute(idx_sql)
+    conn.commit()
+    conn.close()
 
     # Verify the database was created successfully before cleaning up
     if db_path.stat().st_size == 0:

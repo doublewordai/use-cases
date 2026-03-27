@@ -443,8 +443,9 @@ def process_responses(registry: AgentRegistry, results: dict[str, dict]) -> None
     """Update agent states based on batch results.
 
     - finish_reason='stop' → agent completed, store findings
-    - finish_reason='tool_calls' → append assistant message with tool_calls
-    - finish_reason='length' or other → agent failed
+    - finish_reason='tool_calls' (or any response with tool_calls present,
+      including 'length') → append assistant message, tools need execution
+    - finish_reason='length' with no tool_calls, or other → agent failed
     """
     for custom_id, result in results.items():
         # custom_id format: "{agent_id}-iter-{n}"

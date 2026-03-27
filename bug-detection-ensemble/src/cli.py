@@ -65,8 +65,8 @@ def cli():
 def scan(dataset: str, max_samples: int, output: str):
     """Load dataset and generate scan batch JSONL.
 
-    The output file includes model in each request line. Submit with
-    `dw stream` or `dw batches run`, then analyze with `bug-ensemble analyze`.
+    The output file has no model set — use `dw files prepare --model <name>`
+    to set the model before submitting with `dw batches run`.
     """
     output_dir = Path(output)
     output_dir.mkdir(parents=True, exist_ok=True)

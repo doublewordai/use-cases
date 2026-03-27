@@ -6,8 +6,8 @@ workflow = [
     "dw project run prepare -- -i unsplash-research-dataset-lite-latest/photos.csv000 -n 1000",
     "dw files stats batches/batch_00.jsonl",
     "dw files prepare batches/ --model Qwen/Qwen3-VL-30B-A3B-Instruct-FP8",
-    "dw batches run batches/ --watch",
-    "dw batches results <batch-id> -o results/summaries.jsonl",
+    "dw batches run batches/ --watch --output-id .batch-id",
+    "dw batches results $(cat .batch-id) -o results/summaries.jsonl",
     "dw project run analyze -- -i unsplash-research-dataset-lite-latest/photos.csv000 -r results/summaries.jsonl",
 ]
 

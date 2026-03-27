@@ -108,7 +108,7 @@ Or run each step manually for more control:
 Download the CVEfixes database (~2GB SQLite):
 
 ```bash
-uv run bug-ensemble fetch-cvefixes
+dw project run fetch-data
 ```
 
 Generate the classification batch JSONL:

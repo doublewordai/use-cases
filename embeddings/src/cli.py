@@ -247,15 +247,15 @@ def search_cmd(query: str, results_dir: str, top_k: int):
 
 
 def main():
-    try:
-        cli()
-    finally:
-        # The HuggingFace `datasets` library spawns background threads that
-        # prevent clean shutdown. Only force-exit if datasets was imported
-        # (i.e., the prepare command was run). Other commands exit normally.
-        if "datasets" in sys.modules:
-            import os
-            os._exit(0)
+    # Run the CLI normally. If the HuggingFace `datasets` library was
+    # imported (by the prepare command), it spawns background threads that
+    # block shutdown. In that case, force-exit after cli() returns
+    # successfully. On errors, let the exception propagate normally so
+    # the exit code is preserved.
+    cli()
+    if "datasets" in sys.modules:
+        import os
+        os._exit(0)
 
 
 if __name__ == "__main__":

@@ -74,20 +74,33 @@ def get_openai_client() -> OpenAI:
 
 
 def create_batch_file(requests_list: list[dict], output_path: Path) -> Path:
-    """Write requests to JSONL file."""
+    """Write requests to JSONL file.
+
+    Accepts either pre-formatted request dicts (with method/url/body keys)
+    or legacy dicts (with model/messages keys).
+    """
     with open(output_path, "w") as f:
         for i, req in enumerate(requests_list):
-            line = {
-                "custom_id": req.get("custom_id", f"req-{i:06d}"),
-                "method": "POST",
-                "url": "/v1/chat/completions",
-                "body": {
-                    "model": req["model"],
+            if "body" in req:
+                # Pre-formatted batch request — write as-is
+                line = dict(req)
+                if "custom_id" not in line:
+                    line["custom_id"] = f"req-{i:06d}"
+            else:
+                # Legacy format — wrap into batch request structure
+                body = {
                     "messages": req["messages"],
                     "temperature": req.get("temperature", 0.0),
                     "response_format": {"type": "json_object"},
                 }
-            }
+                if "model" in req:
+                    body["model"] = req["model"]
+                line = {
+                    "custom_id": req.get("custom_id", f"req-{i:06d}"),
+                    "method": "POST",
+                    "url": "/v1/chat/completions",
+                    "body": body,
+                }
             f.write(json.dumps(line) + "\n")
     return output_path
 

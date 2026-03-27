@@ -4,7 +4,7 @@ Large-scale data cleaning and enrichment has always been tedious: write regex fo
 
 We cleaned and standardized 50,000 company records from a public dataset, fixing inconsistent names, normalizing addresses, and extracting structured fields, for \$0.80 on Doubleword's batch API versus \$27 on GPT-4o realtime.
 
-To run this yourself, sign up at [app.doubleword.ai](https://app.doubleword.ai) and generate an API key.
+To run this yourself, install the [dw CLI](https://github.com/doublewordai/dw) and `dw login`, or sign up at [app.doubleword.ai](https://app.doubleword.ai).
 
 ## Why This Matters
 
@@ -131,47 +131,65 @@ This hybrid approach, traditional algorithms for candidate generation and LLM fo
 
 ## Running It Yourself
 
-Set up your environment:
+### Using the Doubleword CLI
+
+Install the [dw CLI](https://github.com/doublewordai/dw) and log in:
 
 ```bash
-cd data-processing-pipelines && uv sync
-export DOUBLEWORD_API_KEY="your-key"
+dw login
 ```
+
+Clone, setup, and see the full workflow:
+
+```bash
+dw examples clone data-processing-pipelines
+cd data-processing-pipelines
+dw project setup
+dw project info
+```
+
+The fastest way to run everything end-to-end:
+
+```bash
+dw project run-all
+```
+
+Or run each step manually for more control:
 
 Download the SEC EDGAR dataset (no API key needed):
 
 ```bash
-uv run data-pipelines prepare --limit 10000
+dw project run prepare -- --limit 500
 ```
 
 Or use your own CSV file (must have a `name` column):
 
 ```bash
-uv run data-pipelines prepare --input your-data.csv --limit 10000
+dw project run prepare -- --input your-data.csv --limit 10000
 ```
 
-Run the full pipeline (all three stages sequentially):
+Run the full pipeline (normalize -> deduplicate -> enrich):
 
 ```bash
-uv run data-pipelines run -m 30b
+dw project run pipeline -- -m Qwen/Qwen3-VL-30B-A3B-Instruct-FP8
 ```
 
 Use `--dry-run` to generate the batch files without submitting:
 
 ```bash
-uv run data-pipelines run -m 30b --dry-run
-```
-
-Check status of a running batch:
-
-```bash
-uv run data-pipelines status --batch-id <batch-id>
+dw project run pipeline -- -m Qwen/Qwen3-VL-30B-A3B-Instruct-FP8 --dry-run
 ```
 
 Analyze the results:
 
 ```bash
-uv run data-pipelines analyze
+dw project run analyze
+```
+
+Check overall usage:
+
+```bash
+dw usage --since $(date +%Y-%m-%d)
 ```
 
 The `results/` directory contains outputs from each stage, along with summary statistics and cost breakdowns.

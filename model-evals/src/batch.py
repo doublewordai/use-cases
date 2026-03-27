@@ -45,19 +45,26 @@ def get_client(provider: str = "doubleword") -> tuple[OpenAI, str]:
 
 
 def create_batch_file(requests_data: list[dict], output_path: Path) -> Path:
-    """Write requests to JSONL file for batch processing."""
+    """Write requests to JSONL file for batch processing.
+
+    Each request should have: custom_id, messages, and optionally model,
+    temperature, max_tokens. If model is omitted, set it later with
+    `dw files prepare --model <name>`.
+    """
     with open(output_path, "w") as f:
         for req in requests_data:
+            body = {
+                "messages": req["messages"],
+                "temperature": req.get("temperature", 0),
+                "max_tokens": req.get("max_tokens", 512),
+            }
+            if "model" in req:
+                body["model"] = req["model"]
             line = {
                 "custom_id": req["custom_id"],
                 "method": "POST",
                 "url": "/v1/chat/completions",
-                "body": {
-                    "model": req["model"],
-                    "messages": req["messages"],
-                    "temperature": req.get("temperature", 0),
-                    "max_tokens": req.get("max_tokens", 512),
-                },
+                "body": body,
             }
             f.write(json.dumps(line) + "\n")
     return output_path

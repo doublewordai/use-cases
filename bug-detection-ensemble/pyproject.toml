@@ -2,7 +2,7 @@
 name = "bug-detection-ensemble"
 version = "0.1.0"
 description = "Bug detection ensemble - ask 'is there a bug?' 20 different ways"
-readme = "INSTRUCTIONS.md"
+readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "click>=8.0",

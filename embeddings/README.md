@@ -2,7 +2,7 @@
 
 Vector embeddings power semantic search, RAG pipelines, and recommendation systems, but generating them at scale gets expensive. We embedded a document corpus using Doubleword's batch API for \$0.03, compared to \$0.21 on OpenAI's realtime API or \$0.10 on OpenAI's batch API. Since embedding is a single-batch operation with no sequential dependencies, the 24-hour SLA is fine here, and the cost savings are substantial.
 
-To run this yourself, sign up at [app.doubleword.ai](https://app.doubleword.ai) and generate an API key.
+To run this yourself, install the [dw CLI](https://github.com/doublewordai/dw) and `dw login`, or sign up at [app.doubleword.ai](https://app.doubleword.ai).
 
 ## Why This Matters
 
@@ -102,44 +102,81 @@ The key insight for batch embedding is that all documents are independent. The e
 
 ## Running It Yourself
 
-Set up your environment:
+### Using the Doubleword CLI
+
+Install the [dw CLI](https://github.com/doublewordai/dw) and log in:
 
 ```bash
-cd embeddings && uv sync
-export DOUBLEWORD_API_KEY="your-key"
+dw login
 ```
 
-Download and prepare the Wikipedia abstracts (streamed from HuggingFace, no API key needed):
+Clone, setup, and see the full workflow:
 
 ```bash
-uv run embeddings prepare --limit 100000
+dw examples clone embeddings
+cd embeddings
+dw project setup
+dw project info
 ```
 
-Submit the embedding batch:
+The fastest way to run everything end-to-end:
 
 ```bash
-uv run embeddings run -m qwen3-emb
+dw project run-all
 ```
 
-Check batch status:
+Or run each step manually for more control:
+
+Generate the embedding batch. This downloads Wikipedia abstracts and creates a JSONL file:
 
 ```bash
-uv run embeddings status --batch-id <batch-id>
+dw project run prepare -- -n 10000
 ```
 
-Once complete, run semantic search queries:
+Inspect and set the model:
 
 ```bash
-uv run embeddings search --query "how do black holes form"
+dw files stats batches/batch.jsonl
+dw files prepare batches/batch.jsonl --model Qwen/Qwen3-Embedding-8B
 ```
 
-Analyze results and token usage:
+Submit the batch and watch progress:
 
 ```bash
-uv run embeddings analyze
+dw batches run batches/batch.jsonl --watch --output-id .batch-id
 ```
 
-The `results/` directory contains the raw embeddings, the built index, and evaluation metrics.
+Download results and build the search index:
+
+```bash
+dw batches results $(cat .batch-id) -o results/embeddings.jsonl
+dw project run build-index -- -r results/embeddings.jsonl
+```
+
+Search:
+
+```bash
+dw project run search -- -q "how do black holes form"
+```
+
+Check what it cost:
+
+```bash
+dw batches analytics $(cat .batch-id)
+```
+
+#### Sample first, then scale
+
+For a quick test before embedding the full corpus:
+
+```bash
+dw files sample batches/batch.jsonl -n 100 -o batches/sample.jsonl
+dw files prepare batches/sample.jsonl --model Qwen/Qwen3-Embedding-8B
+dw batches run batches/sample.jsonl --watch --output-id .batch-id
+dw batches results $(cat .batch-id) -o results/sample.jsonl
+```
+
+The `results/` directory contains the raw embeddings, the built HNSW index, and search metadata.
 
 ## Limitations
 

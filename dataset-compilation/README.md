@@ -2,7 +2,7 @@
 
 We built a comprehensive dataset of datacenter networking hardware companies using LLM-powered search and filtering. The pipeline recursively expands a topic description into diverse search queries, extracts structured data with batch inference, then validates each candidate with a second LLM pass. The final dataset contains 188 unique companies with 100% recall against the Gartner Magic Quadrant.
 
-To run this yourself, sign up at [app.doubleword.ai](https://app.doubleword.ai) and generate an API key.
+To run this yourself, install the [dw CLI](https://github.com/doublewordai/dw) and `dw login`, or sign up at [app.doubleword.ai](https://app.doubleword.ai).
 
 ## Why This Works
 
@@ -79,24 +79,43 @@ The cost difference is roughly 500x. You can run hundreds of queries, validate e
 
 ## Replication
 
-The pipeline has five commands, each with explicit `--input` and `--output` flags so you can see exactly what flows where.
+### Using the Doubleword CLI
 
-### Setup
+Install the [dw CLI](https://github.com/doublewordai/dw) and log in:
 
 ```bash
-cd dataset-compilation && uv sync
-
-export DOUBLEWORD_API_KEY="your-key"  # from app.doubleword.ai
-export SERPER_API_KEY="your-key"       # from serper.dev
+dw login
 ```
+
+Clone, setup, and see the full workflow:
+
+```bash
+dw examples clone dataset-compilation
+cd dataset-compilation
+dw project setup
+dw project info
+```
+
+The fastest way to run everything end-to-end:
+
+```bash
+dw project run-all
+```
+
+Or run each step manually for more control:
+
+You'll also need a [Serper](https://serper.dev) API key for web search:
+
+```bash
+export SERPER_API_KEY="your-key"
+```
+
+The pipeline has explicit `--input` and `--output` flags so you can see exactly what flows where.
 
 ### Step 1: Generate Search Queries
 
 ```bash
-uv run dataset-compilation generate-queries \
-  --topic "datacenter networking hardware companies" \
-  --max-depth 3 \
-  --output queries.json
+dw project run generate-queries -- --topic "datacenter networking hardware companies" --max-depth 3 --output queries.json
 ```
 
 The command recursively expands the topic into diverse search queries. Starting from the topic description, the LLM generates 3-5 sub-queries that approach it from different angles (geography, product type, company type, etc.). Each sub-query expands again until the queries are specific enough to search. A depth-3 tree typically yields 100-150 queries covering:
@@ -111,10 +130,7 @@ Query diversity matters more than volume. The recursive expansion ensures we pro
 ### Step 2: Run Searches
 
 ```bash
-uv run dataset-compilation search \
-  --input queries.json \
-  --output search_results.json \
-  --results-per-query 50
+dw project run search -- -i queries.json -o search_results.json --results-per-query 50
 ```
 
 This runs each query through Serper. We use 50 results per query to get broad coverage.
@@ -122,9 +138,7 @@ This runs each query through Serper. We use 50 results per query to get broad co
 ### Step 3: Extract Companies
 
 ```bash
-uv run dataset-compilation extract \
-  --input search_results.json \
-  --output companies_raw.json
+dw project run extract -- -i search_results.json -o companies_raw.json
 ```
 
 For each search result, we extract structured company data: name, description, products, headquarters, and website. Since we're processing 1,200+ pages, we use batch inference at 50% off real-time pricing. The command waits for the batch to complete by default.
@@ -132,9 +146,7 @@ For each search result, we extract structured company data: name, description, p
 ### Step 4: First Dedupe Pass
 
 ```bash
-uv run dataset-compilation dedupe \
-  --input companies_raw.json \
-  --output companies.json
+dw project run dedupe -- -i companies_raw.json -o companies.json
 ```
 
 Raw extraction produces multiple mentions of the same company with variant names ("Cisco" vs "Cisco Systems" vs "Cisco Systems, Inc."). The LLM clusters these duplicates semantically, which handles cases like "HPE" vs "Hewlett Packard Enterprise" that string normalization would miss.
@@ -142,9 +154,7 @@ Raw extraction produces multiple mentions of the same company with variant names
 ### Step 5: Filter and Validate
 
 ```bash
-uv run dataset-compilation filter \
-  --input companies.json \
-  --output companies_filtered.json
+dw project run filter -- -i companies.json -o companies_filtered.json
 ```
 
 This step does the heavy lifting. Raw extraction found "Amazon" and "Microsoft" because their marketing pages mention networking hardware, even though they don't manufacture it. For each candidate, we run a fresh web search and ask the LLM to classify whether the company actually makes networking hardware or is something else entirely.
@@ -154,9 +164,7 @@ The command also saves `companies_filtered_excluded.json` with the LLM's reasoni
 ### Step 6: Second Dedupe Pass
 
 ```bash
-uv run dataset-compilation dedupe \
-  --input companies_filtered.json \
-  --output companies_final.json
+dw project run dedupe -- -i companies_filtered.json -o companies_final.json
 ```
 
 We run dedupe again on the smaller, cleaner filtered list. This catches remaining duplicates like "NVIDIA" and "Nvidia Corporation" that both passed the filter independently.
@@ -164,9 +172,7 @@ We run dedupe again on the smaller, cleaner filtered list. This catches remainin
 ### Validate Against Ground Truth
 
 ```bash
-uv run dataset-compilation validate \
-  --input companies_final.json \
-  --ground-truth ground_truth.json
+dw project run validate -- -i companies_final.json --ground-truth ground_truth.json
 ```
 
 This checks recall against known companies (like the Gartner Magic Quadrant) and identifies any remaining duplicate clusters in the output.

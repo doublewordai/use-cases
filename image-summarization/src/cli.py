@@ -1,44 +1,26 @@
-"""CLI for image summarization via the Doubleword Batch API."""
+"""CLI for image summarization via the Doubleword CLI.
+
+This module handles image fetching, encoding, and prompt building.
+Batch submission and result retrieval are done via the `dw` CLI —
+see the README for the full workflow.
+"""
 
 import asyncio
 import base64
 import io
 import json
 import math
-import os
 from pathlib import Path
 
 import click
 import pandas as pd
 from PIL import Image
-from tqdm import tqdm
 
 # Unsplash originals can exceed Pillow's default pixel limit
 Image.MAX_IMAGE_PIXELS = None
 
-from .batch import (
-    count_tokens,
-    create_batch,
-    create_batch_file,
-    download_results,
-    get_client,
-    parse_results,
-    upload_batch_file,
-    wait_for_batch,
-)
-
-MODELS = {
-    "30b": "Qwen/Qwen3-VL-30B-A3B-Instruct-FP8",
-    "235b": "Qwen/Qwen3-VL-235B-A22B-Instruct-FP8",
-    "gpt5-nano": "gpt-5-nano",
-    "gpt5-mini": "gpt-5-mini",
-    "gpt5.2": "gpt-5.2",
-}
-DEFAULT_MODEL = "30b"
-
 TARGET_WIDTH = 1920
 TARGET_HEIGHT = 1080
-
 IMAGES_PER_REQUEST = 20
 NUM_BATCH_FILES = 10
 
@@ -126,7 +108,7 @@ async def fetch_images(urls: list[str], cache_dir: Path) -> list[str | None]:
 
 @click.group()
 def cli():
-    """Image summarization at scale with the Doubleword Batch API."""
+    """Image summarization at scale with the Doubleword CLI."""
     pass
 
 
@@ -143,37 +125,28 @@ def cli():
     "--output",
     "-o",
     "output_dir",
-    default="results",
+    default="batches",
     type=click.Path(),
-    help="Output directory for batch files and results",
-)
-@click.option(
-    "--model",
-    "-m",
-    default=DEFAULT_MODEL,
-    help="Model alias (30b, 235b, gpt5-nano, gpt5-mini, gpt5.2) or full name",
+    help="Output directory for batch JSONL files",
 )
 @click.option(
     "--num-images", "-n", default=1000, type=int, help="Number of images to process"
 )
-@click.option("--dry-run", is_flag=True, help="Prepare batch file but don't submit")
-def run(input_path: str, output_dir: str, model: str, num_images: int, dry_run: bool):
-    """Fetch images, build prompts, and submit a batch for summarization."""
+def prepare(input_path: str, output_dir: str, num_images: int):
+    """Fetch images, encode to base64, and generate batch JSONL files.
+
+    The output files have no model set — use `dw files prepare --model <name>`
+    to set the model before submitting with `dw stream` or `dw batches run`.
+    """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    model_full = MODELS.get(model, model)
-    model_short = next(
-        (k for k, v in MODELS.items() if v == model_full), model.split("/")[-1]
-    )
-
-    click.echo(f"Model: {model_full}")
     click.echo(f"Loading dataset...")
     df = load_unsplash_data(input_path, num_images)
     click.echo(f"Loaded {len(df)} images")
 
     # Fetch and encode images
-    click.echo("Fetching and resizing images...")
+    click.echo("Fetching and resizing images (cached after first download)...")
     urls = df["photo_image_url"].tolist()
     b64_images = asyncio.run(fetch_images(urls, Path("image_cache")))
 
@@ -191,13 +164,12 @@ def run(input_path: str, output_dir: str, model: str, num_images: int, dry_run: 
 
     click.echo(f"Valid images: {len(valid_images)} ({skipped} skipped)")
 
-    # Group into multi-image requests (IMAGES_PER_REQUEST images each)
+    # Group into multi-image requests
     requests_data = []
     for group_start in range(0, len(valid_images), IMAGES_PER_REQUEST):
         group = valid_images[group_start : group_start + IMAGES_PER_REQUEST]
         group_idx = group_start // IMAGES_PER_REQUEST
 
-        # Build metadata block
         metadata_lines = []
         for i, (orig_idx, _, desc, photog) in enumerate(group, 1):
             metadata_lines.append(f"{i}. Caption: {desc} | Photographer: {photog}")
@@ -205,7 +177,6 @@ def run(input_path: str, output_dir: str, model: str, num_images: int, dry_run: 
 
         prompt = PROMPT.format(num_images=len(group), metadata=metadata)
 
-        # Build content array: text prompt followed by all images
         content = [{"type": "text", "text": prompt}]
         for _, b64, _, _ in group:
             content.append(
@@ -221,8 +192,9 @@ def run(input_path: str, output_dir: str, model: str, num_images: int, dry_run: 
                 "method": "POST",
                 "url": "/v1/chat/completions",
                 "body": {
-                    "model": model_full,
                     "messages": [{"role": "user", "content": content}],
+                    "temperature": 0,
+                    "max_tokens": 2048,
                 },
             }
         )
@@ -231,7 +203,7 @@ def run(input_path: str, output_dir: str, model: str, num_images: int, dry_run: 
         f"Built {len(requests_data)} requests ({IMAGES_PER_REQUEST} images each)"
     )
 
-    # Split requests across NUM_BATCH_FILES files
+    # Split across multiple batch files (vision requests can be large)
     requests_per_file = math.ceil(len(requests_data) / NUM_BATCH_FILES)
     batch_files = []
     for file_idx in range(NUM_BATCH_FILES):
@@ -240,89 +212,35 @@ def run(input_path: str, output_dir: str, model: str, num_images: int, dry_run: 
         ]
         if not chunk:
             break
-        batch_file = output_dir / f"batch_{model_short}_{file_idx:02d}.jsonl"
-        create_batch_file(chunk, batch_file)
+        batch_file = output_dir / f"batch_{file_idx:02d}.jsonl"
+        with open(batch_file, "w") as f:
+            for req in chunk:
+                f.write(json.dumps(req) + "\n")
         size_mb = batch_file.stat().st_size / (1024 * 1024)
         batch_files.append(batch_file)
-        click.echo(f"Created {batch_file} ({size_mb:.1f} MB, {len(chunk)} requests)")
+        click.echo(f"  {batch_file} ({size_mb:.1f} MB, {len(chunk)} requests)")
 
-    click.echo(f"Created {len(batch_files)} batch files")
+    # Save index mapping so analyze() can map groups back to images correctly
+    # (accounting for skipped images during fetch)
+    mapping = []
+    for group_start in range(0, len(valid_images), IMAGES_PER_REQUEST):
+        group = valid_images[group_start : group_start + IMAGES_PER_REQUEST]
+        group_idx = group_start // IMAGES_PER_REQUEST
+        for pos, (orig_idx, _, _, _) in enumerate(group):
+            mapping.append({"group": f"group-{group_idx:05d}", "position": pos, "orig_idx": orig_idx})
 
-    if dry_run:
-        click.echo("Dry run - skipping submission")
-        return
+    mapping_path = output_dir / "image_mapping.json"
+    with open(mapping_path, "w") as f:
+        json.dump(mapping, f)
+    click.echo(f"Saved image mapping to {mapping_path}")
 
-    # Submit each batch file
-    client = get_client()
-    all_batch_info = []
-    for file_idx, batch_file in enumerate(batch_files):
-        click.echo(f"\nUploading batch file {file_idx + 1}/{len(batch_files)}...")
-        file_id = upload_batch_file(client, batch_file)
-        click.echo(f"File ID: {file_id}")
-
-        click.echo("Creating batch...")
-        batch_id = create_batch(client, file_id)
-        click.echo(f"Batch ID: {batch_id}")
-
-        batch_info = {
-            "batch_id": batch_id,
-            "file_id": file_id,
-            "model": model_full,
-            "model_short": f"{model_short}_{file_idx:02d}",
-        }
-        all_batch_info.append(batch_info)
-
-        info_path = output_dir / f"batch_{model_short}_{file_idx:02d}_info.json"
-        with open(info_path, "w") as f:
-            json.dump(batch_info, f, indent=2)
-
+    click.echo(f"\nCreated {len(batch_files)} batch files in {output_dir}/")
     click.echo(
-        f"\nSubmitted {len(all_batch_info)} batches. Run 'image-summarization status' to check progress."
+        f"\nNext steps:\n"
+        f"  dw files prepare {output_dir}/ --model Qwen/Qwen3-VL-30B-A3B-Instruct-FP8\n"
+        f"  dw stream {output_dir}/ > results/summaries.jsonl\n"
+        f"  # or: dw batches run {output_dir}/ --watch"
     )
-
-
-@cli.command()
-@click.option(
-    "--output",
-    "-o",
-    "output_dir",
-    default="results",
-    type=click.Path(exists=True),
-    help="Output directory with batch info files",
-)
-@click.option("--wait/--no-wait", default=True, help="Wait for batches to complete")
-def status(output_dir: str, wait: bool):
-    """Check batch status and download results when complete."""
-    output_dir = Path(output_dir)
-    client = get_client()
-
-    info_files = sorted(output_dir.glob("batch_*_info.json"))
-    if not info_files:
-        raise click.ClickException("No batch info files found. Run 'run' first.")
-
-    for info_file in info_files:
-        with open(info_file) as f:
-            info = json.load(f)
-
-        batch_id = info["batch_id"]
-        model_short = info.get("model_short", "default")
-        click.echo(f"\n=== Batch {model_short} ({batch_id}) ===")
-
-        batch = client.batches.retrieve(batch_id)
-        click.echo(f"Status: {batch.status}")
-        click.echo(
-            f"Progress: {batch.request_counts.completed}/{batch.request_counts.total}"
-        )
-
-        if batch.status == "in_progress" and wait:
-            click.echo("Waiting for completion...")
-            batch = wait_for_batch(client, batch_id)
-
-        if batch.status == "completed" and batch.output_file_id:
-            results_file = output_dir / f"results_{model_short}.jsonl"
-            click.echo(f"Downloading results to {results_file}...")
-            download_results(client, batch.output_file_id, results_file)
-            click.echo("Done!")
 
 
 @cli.command()
@@ -335,12 +253,10 @@ def status(output_dir: str, wait: bool):
     help="Path to Unsplash Lite photos.csv000 file",
 )
 @click.option(
-    "--results-dir",
+    "--results",
     "-r",
-    "results_dir",
-    default="results",
-    type=click.Path(exists=True),
-    help="Directory containing result files",
+    required=True,
+    help="Results JSONL file (from `dw stream` or `dw batches results`)",
 )
 @click.option(
     "--output",
@@ -354,63 +270,117 @@ def status(output_dir: str, wait: bool):
     "-n",
     default=1000,
     type=int,
-    help="Number of images (must match the run)",
+    help="Number of images (must match the prepare run)",
 )
-def analyze(input_path: str, results_dir: str, output_file: str, num_images: int):
-    """Combine results into a CSV and print token usage summary."""
-    results_dir = Path(results_dir)
-    output_file = Path(output_file)
+@click.option(
+    "--mapping",
+    default="batches/image_mapping.json",
+    help="Image mapping file from prepare step",
+)
+def analyze(input_path: str, results: str, output_file: str, num_images: int, mapping: str):
+    """Parse results and create a CSV of image summaries."""
+    results_path = Path(results)
+    output_path = Path(output_file)
+
+    if not results_path.exists():
+        raise click.ClickException(f"Results file not found: {results_path}")
 
     df = load_unsplash_data(input_path, num_images)
     click.echo(f"Loaded {len(df)} images from dataset")
 
-    result_files = sorted(results_dir.glob("results_*.jsonl"))
-    if not result_files:
-        raise click.ClickException(
-            "No result files found. Run 'status' first to download results."
-        )
+    # Parse results
+    batch_results = {}
+    with open(results_path) as f:
+        for line in f:
+            if line.strip():
+                obj = json.loads(line)
+                batch_results[obj["custom_id"]] = obj
 
-    for result_file in result_files:
-        model_short = result_file.stem.replace("results_", "")
-        click.echo(f"\n=== {model_short} ===")
+    click.echo(f"Loaded {len(batch_results)} results")
 
-        results = parse_results(result_file)
-        click.echo(f"Results: {len(results)}")
+    # Token usage
+    input_tokens = 0
+    output_tokens = 0
+    for r in batch_results.values():
+        rb = r.get("response_body") or r.get("response", {}).get("body", {})
+        usage = rb.get("usage", {})
+        input_tokens += usage.get("prompt_tokens", 0)
+        output_tokens += usage.get("completion_tokens", 0)
 
-        # Token usage
-        tokens = count_tokens(results)
-        click.echo(f"Input tokens: {tokens['input_tokens']:,}")
-        click.echo(f"Output tokens: {tokens['output_tokens']:,}")
+    click.echo(f"Input tokens: {input_tokens:,}")
+    click.echo(f"Output tokens: {output_tokens:,}")
 
-        # Extract summaries and attach to dataframe
-        summaries = {}
-        errors = 0
-        for custom_id, result in results.items():
-            try:
-                content = result["response"]["body"]["choices"][0]["message"]["content"]
-                summaries[custom_id] = content
-            except (KeyError, IndexError, TypeError):
-                errors += 1
-                summaries[custom_id] = "[ERROR]"
+    # Extract summaries
+    summaries = {}
+    errors = 0
+    for custom_id, result in batch_results.items():
+        try:
+            rb = result.get("response_body") or result.get("response", {}).get("body", {})
+            content = rb["choices"][0]["message"]["content"]
+            summaries[custom_id] = content
+        except (KeyError, IndexError, TypeError):
+            errors += 1
+            summaries[custom_id] = "[ERROR]"
 
-        if errors:
-            click.echo(f"Errors: {errors}")
+    if errors:
+        click.echo(f"Errors: {errors}")
 
-        # Map summaries back to dataframe rows by index
-        summary_col = []
-        for idx in range(len(df)):
-            cid = f"img-{idx:05d}"
-            summary_col.append(summaries.get(cid, ""))
+    click.echo(f"Summaries extracted: {len(summaries)}")
 
+    # Parse numbered summaries from group responses into per-image summaries
+    def parse_numbered_summaries(text: str, expected: int) -> list[str]:
+        """Split '1. ... 2. ... 3. ...' into individual summaries."""
+        import re
+        parts = re.split(r'\n\s*\d+\.\s+', "\n" + text)
+        # First split element is empty (before "1.")
+        parts = [p.strip() for p in parts if p.strip()]
+        # Pad or truncate to expected count
+        while len(parts) < expected:
+            parts.append("")
+        return parts[:expected]
+
+    # Load image mapping from prepare step
+    mapping_path = Path(mapping)
+
+    if mapping_path.exists():
+        with open(mapping_path) as f:
+            mapping = json.load(f)
+
+        # Build per-image summaries using the mapping
+        per_image = {}
+        # Group mapping entries by group
+        from collections import defaultdict
+        groups = defaultdict(list)
+        for entry in mapping:
+            groups[entry["group"]].append(entry)
+
+        for group_id, entries in groups.items():
+            group_text = summaries.get(group_id, "")
+            parsed = parse_numbered_summaries(group_text, len(entries))
+            for entry, summary in zip(entries, parsed):
+                per_image[entry["orig_idx"]] = summary
+
+        # Build output CSV using the mapping
         out_df = df[
             ["photo_image_url", "photo_description", "photographer_username"]
         ].copy()
+        summary_col = [per_image.get(idx, "") for idx in range(len(df))]
         out_df["summary"] = summary_col
-        out_df["model"] = model_short
+    else:
+        click.echo("Warning: image_mapping.json not found, falling back to positional mapping")
+        out_df = df[
+            ["photo_image_url", "photo_description", "photographer_username"]
+        ].copy()
+        summary_col = []
+        for idx in range(len(df)):
+            group_idx = idx // IMAGES_PER_REQUEST
+            cid = f"group-{group_idx:05d}"
+            summary_col.append(summaries.get(cid, ""))
+        out_df["summary"] = summary_col
 
-        output_file.parent.mkdir(parents=True, exist_ok=True)
-        out_df.to_csv(output_file, index=False)
-        click.echo(f"Saved {len(out_df)} summaries to {output_file}")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    out_df.to_csv(output_path, index=False)
+    click.echo(f"\nSaved {len(out_df)} rows to {output_path}")
 
 
 if __name__ == "__main__":

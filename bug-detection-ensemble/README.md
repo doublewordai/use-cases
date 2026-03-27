@@ -4,7 +4,7 @@ Classification is everywhere: categorizing support tickets, labeling documents, 
 
 We tested this on a hard problem—classifying security vulnerabilities by type—using 4,642 real vulnerabilities from CVEfixes. Qwen3-30B achieved 46.5% accuracy on grouped classification (Memory Safety, Pointer, Integer, etc.) at a cost of \$0.40. Running twice and using agreement as a calibration signal pushes accuracy to 66% on the 58% of samples where both runs agree.
 
-To run this yourself, sign up at [app.doubleword.ai](https://app.doubleword.ai) and generate an API key.
+To run this yourself, install the [dw CLI](https://github.com/doublewordai/dw) and `dw login`, or sign up at [app.doubleword.ai](https://app.doubleword.ai).
 
 ## Why This Matters
 
@@ -80,33 +80,79 @@ The model over-predicts CWE-125, the most common class in the dataset. These con
 
 ## Replication
 
+### Using the Doubleword CLI
+
+Install the [dw CLI](https://github.com/doublewordai/dw) and log in:
+
 ```bash
-cd bug-detection-ensemble
-uv sync
-
-# Download CVEfixes (~2GB SQLite database)
-uv run bug-ensemble fetch-cvefixes
-
-# Set API key
-export DOUBLEWORD_API_KEY="your-key"
-
-# Run classification
-uv run bug-ensemble classify -m 30b -o results/run1
-uv run bug-ensemble classify -m 30b -o results/run2
-
-# Check batch status
-uv run bug-ensemble status -o results/run1 --wait
-
-# Analyze results
-uv run bug-ensemble classify-analyze -o results/run1
+dw login
 ```
 
-### Available Models
+Clone, setup, and see the full workflow:
 
-| Alias | Model |
-|-------|-------|
-| `30b` | Qwen3-30B-A3B-Instruct |
-| `235b` | Qwen3-235B-A22B-Instruct |
+```bash
+dw examples clone bug-detection-ensemble
+cd bug-detection-ensemble
+dw project setup
+dw project info
+```
+
+The fastest way to run everything end-to-end:
+
+```bash
+dw project run-all
+```
+
+Or run each step manually for more control:
+
+Download the CVEfixes database (~2GB SQLite):
+
+```bash
+dw project run fetch-data
+```
+
+Generate the classification batch JSONL:
+
+```bash
+dw project run prepare
+```
+
+Inspect and set the model:
+
+```bash
+dw files stats batches/classify.jsonl
+dw files prepare batches/classify.jsonl --model Qwen/Qwen3-VL-30B-A3B-Instruct-FP8
+```
+
+Submit the batch and watch progress:
+
+```bash
+dw batches run batches/classify.jsonl --watch --output-id .batch-id
+```
+
+Download results and analyze:
+
+```bash
+dw batches results $(cat .batch-id) -o results/classify.jsonl
+dw project run analyze -- -r results/classify.jsonl
+```
+
+Check what it cost:
+
+```bash
+dw batches analytics $(cat .batch-id)
+```
+
+#### Calibration: run twice
+
+At \$0.40 per run, you can run the same classification twice and use agreement as a confidence signal. Submit a second batch from the same JSONL:
+
+```bash
+dw batches run batches/classify.jsonl --watch --output-id .batch-id-run2
+dw batches results $(cat .batch-id-run2) -o results/classify-run2.jsonl
+```
+
+When both runs agree on a classification, accuracy jumps to 66%. When they disagree, flag for manual review. See the [Calibration](#calibration-run-twice) section above for details.
 
 ### Customizing Categories
 

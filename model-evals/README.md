@@ -2,7 +2,7 @@
 
 When model evaluation is cheap enough, you can run comprehensive benchmarks instead of spot-checking. We evaluated four models on the full GSM8K test set (1,319 questions) and found that Doubleword's Qwen3-235B matches GPT-5.2's 96.9% accuracy at \$0.21 versus \$1.06—the kind of comparison that becomes routine when batch pricing makes exhaustive testing economical.
 
-To run this yourself, sign up at [app.doubleword.ai](https://app.doubleword.ai) and generate an API key.
+To run this yourself, install the [dw CLI](https://github.com/doublewordai/dw) and `dw login`, or sign up at [app.doubleword.ai](https://app.doubleword.ai).
 
 ## Why This Matters
 
@@ -86,38 +86,85 @@ That's **\$760/year** back in your pocket—enough to matter, not enough to comp
 
 ## Running Your Own Evaluation
 
-The evaluation runs in three steps: submit the batch, wait for completion, analyze results.
+### Using the Doubleword CLI
 
-First, set up your environment and API keys:
-
-```bash
-cd model-evals && uv sync
-
-export DOUBLEWORD_API_KEY="your-key"
-export OPENAI_API_KEY="your-key"  # optional, for GPT models
-```
-
-Submit an evaluation batch. The `-n` flag limits the number of questions (e.g., `-n 100` for a quick test):
+Install the [dw CLI](https://github.com/doublewordai/dw) and log in:
 
 ```bash
-uv run model-evals run --model 235b
+dw login
 ```
 
-The `--model` flag accepts aliases (`235b`, `30b`, `gpt5.2`, `gpt5-mini`, `gpt5-nano`) or full model names. Doubleword models use 24-hour batch windows; OpenAI models use their Batch API with similar latency.
-
-Check batch status while you wait:
+Clone, setup, and prepare the evaluation:
 
 ```bash
-uv run model-evals status
+dw examples clone model-evals
+cd model-evals
+dw project setup
+dw project info
 ```
 
-Once complete, analyze results:
+The fastest way to run everything end-to-end:
 
 ```bash
-uv run model-evals analyze
+dw project run-all
 ```
 
-This produces accuracy metrics, error breakdowns, and cost summaries. The `results/` directory contains raw outputs for deeper analysis.
+Or run each step manually for more control:
+
+Generate the batch file. This downloads GSM8K and creates a JSONL file with all the evaluation prompts (no model set yet):
+
+```bash
+dw project run prepare -- -n 100     # 100 questions for a quick test
+```
+
+Inspect and prepare the file:
+
+```bash
+dw files stats batches/batch.jsonl
+dw files prepare batches/batch.jsonl --model Qwen/Qwen3-VL-235B-A22B-Instruct-FP8
+```
+
+Submit the batch and watch progress:
+
+```bash
+dw batches run batches/batch.jsonl --watch --output-id .batch-id
+```
+
+Download results and score against ground truth:
+
+```bash
+dw batches results $(cat .batch-id) -o results/results.jsonl
+dw project run analyze -- -r results/results.jsonl
+```
+
+Check what it cost:
+
+```bash
+dw batches analytics $(cat .batch-id)
+```
+
+#### Model comparison
+
+To compare multiple models on the same questions:
+
+```bash
+# Prepare variants for each model
+dw files prepare batches/batch.jsonl --model Qwen/Qwen3-VL-30B-A3B-Instruct-FP8 --output-file batches/batch-30b.jsonl
+dw files prepare batches/batch.jsonl --model Qwen/Qwen3-VL-235B-A22B-Instruct-FP8 --output-file batches/batch-235b.jsonl
+
+# Run both
+dw batches run batches/batch-30b.jsonl --watch --output-id .batch-id-30b
+dw batches run batches/batch-235b.jsonl --watch --output-id .batch-id-235b
+
+# Download results
+dw batches results $(cat .batch-id-30b) -o results/results-30b.jsonl
+dw batches results $(cat .batch-id-235b) -o results/results-235b.jsonl
+
+# Compare
+dw files diff results/results-30b.jsonl results/results-235b.jsonl
+dw project run analyze -- -r results/results-30b.jsonl
+dw project run analyze -- -r results/results-235b.jsonl
+```
 
 ## Limitations
 

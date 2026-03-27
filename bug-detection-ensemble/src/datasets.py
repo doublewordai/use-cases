@@ -44,42 +44,111 @@ def download_cvefixes(output_dir: str, progress: bool = True) -> Path:
     output_path.mkdir(parents=True, exist_ok=True)
 
     db_path = output_path / CVEFIXES_DB_NAME
-    if db_path.exists():
+    if db_path.exists() and db_path.stat().st_size > 0:
         click.echo(f"Database already exists: {db_path}")
         return db_path
+    # Remove empty/corrupt file from a previous failed extraction
+    if db_path.exists():
+        db_path.unlink()
 
     zip_path = output_path / "CVEfixes.zip"
 
-    click.echo(f"Downloading CVEfixes from Zenodo...")
-    click.echo(f"URL: {CVEFIXES_ZENODO_URL}")
-    click.echo("(This is ~2GB, may take a while)")
+    if zip_path.exists() and zip_path.stat().st_size > 0:
+        click.echo(f"Using cached download: {zip_path}")
+    else:
+        click.echo(f"Downloading CVEfixes from Zenodo...")
+        click.echo(f"URL: {CVEFIXES_ZENODO_URL}")
+        click.echo("(This is ~2GB, may take a while)")
 
-    def report_hook(block_num, block_size, total_size):
-        if progress and total_size > 0:
-            downloaded = block_num * block_size
-            percent = min(100, downloaded * 100 // total_size)
-            mb_downloaded = downloaded / (1024 * 1024)
-            mb_total = total_size / (1024 * 1024)
-            click.echo(f"\r  {percent}% ({mb_downloaded:.1f}/{mb_total:.1f} MB)", nl=False)
+        def report_hook(block_num, block_size, total_size):
+            if progress and total_size > 0:
+                downloaded = block_num * block_size
+                percent = min(100, downloaded * 100 // total_size)
+                mb_downloaded = downloaded / (1024 * 1024)
+                mb_total = total_size / (1024 * 1024)
+                click.echo(f"\r  {percent}% ({mb_downloaded:.1f}/{mb_total:.1f} MB)", nl=False)
 
-    urllib.request.urlretrieve(CVEFIXES_ZENODO_URL, zip_path, report_hook)
-    click.echo()  # Newline after progress
+        urllib.request.urlretrieve(CVEFIXES_ZENODO_URL, str(zip_path), report_hook)
+        click.echo()  # Newline after progress
 
-    click.echo("Extracting database...")
+    click.echo("Extracting and importing database (this may take several minutes)...")
+    import gzip
+    import shutil
+    import sqlite3
+
     with zipfile.ZipFile(zip_path, 'r') as zf:
-        # Find the .db file in the archive
+        # Find the .sql.gz file in the archive
+        sql_gz_name = None
         for name in zf.namelist():
-            if name.endswith('.db'):
-                # Extract to output_dir
-                zf.extract(name, output_path)
-                extracted_path = output_path / name
-                if extracted_path != db_path:
-                    extracted_path.rename(db_path)
+            if name.endswith('.sql.gz'):
+                sql_gz_name = name
                 break
 
-    # Clean up zip
-    zip_path.unlink()
-    click.echo(f"Database saved to: {db_path}")
+        if not sql_gz_name:
+            raise click.ClickException("No .sql.gz file found in the CVEfixes archive")
+
+        # Extract the compressed SQL dump
+        sql_gz_path = output_path / "CVEfixes.sql.gz"
+        with zf.open(sql_gz_name) as src, open(sql_gz_path, 'wb') as dst:
+            shutil.copyfileobj(src, dst)
+
+    click.echo("  Importing SQL dump into SQLite (streaming)...")
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("PRAGMA journal_mode=OFF")
+    conn.execute("PRAGMA synchronous=OFF")
+
+    # Stream the gzipped SQL line by line to avoid loading ~10GB into memory
+    statement = []
+    skipped = 0
+    with gzip.open(sql_gz_path, 'rt', errors='replace') as gz:
+        for line in gz:
+            stripped = line.strip()
+            if not stripped or stripped.startswith('--'):
+                continue
+            statement.append(line)
+            if stripped.endswith(';'):
+                sql = ''.join(statement)
+                try:
+                    conn.executescript(sql)
+                except sqlite3.Error as e:
+                    # Fail on structural statements — these must succeed
+                    if sql.strip().upper().startswith(('CREATE TABLE', 'CREATE INDEX')):
+                        conn.close()
+                        db_path.unlink(missing_ok=True)
+                        raise click.ClickException(f"Failed on DDL statement: {e}")
+                    skipped += 1
+                statement = []
+
+    conn.commit()
+
+    if skipped > 0:
+        click.echo(f"  Skipped {skipped} incompatible statements")
+
+    # Add indexes for the queries used by classify and scan commands
+    click.echo("  Creating indexes...")
+    for idx_sql in [
+        "CREATE INDEX IF NOT EXISTS idx_method_change_file ON method_change(file_change_id)",
+        "CREATE INDEX IF NOT EXISTS idx_method_change_before ON method_change(before_change)",
+        "CREATE INDEX IF NOT EXISTS idx_file_change_hash ON file_change(hash)",
+        "CREATE INDEX IF NOT EXISTS idx_file_change_id ON file_change(file_change_id)",
+        "CREATE INDEX IF NOT EXISTS idx_commits_hash ON commits(hash)",
+        "CREATE INDEX IF NOT EXISTS idx_fixes_hash ON fixes(hash)",
+        "CREATE INDEX IF NOT EXISTS idx_fixes_cve ON fixes(cve_id)",
+        "CREATE INDEX IF NOT EXISTS idx_cwe_class_cve ON cwe_classification(cve_id)",
+        "CREATE INDEX IF NOT EXISTS idx_cwe_class_cwe ON cwe_classification(cwe_id)",
+    ]:
+        conn.execute(idx_sql)
+    conn.commit()
+    conn.close()
+
+    # Verify the database was created successfully before cleaning up
+    if db_path.stat().st_size == 0:
+        raise click.ClickException("Database import produced an empty file. Check the SQL dump.")
+
+    # Clean up intermediate files only after confirmed success
+    sql_gz_path.unlink(missing_ok=True)
+    zip_path.unlink(missing_ok=True)
+    click.echo(f"Database saved to: {db_path} ({db_path.stat().st_size / 1024 / 1024:.0f} MB)")
 
     return db_path
 

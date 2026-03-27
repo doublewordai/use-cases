@@ -33,6 +33,9 @@ def load_wikipedia_abstracts(limit: int = 100000) -> list[dict]:
             }
         )
 
+    # Explicitly clean up the streaming dataset to release background threads/connections
+    del dataset
+
     return docs
 
 

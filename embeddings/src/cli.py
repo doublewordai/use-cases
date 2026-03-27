@@ -1,40 +1,26 @@
-"""CLI for batch embedding and semantic search."""
+"""CLI for batch embedding and semantic search.
+
+This module handles data preparation, index building, and search.
+Batch submission and result retrieval are done via the `dw` CLI —
+see the README for the full workflow.
+"""
 
 import json
-from datetime import datetime
+import sys
 from pathlib import Path
 
 import click
 import numpy as np
 
-from .batch import (
-    count_tokens,
-    create_batch,
-    create_batch_file,
-    download_results,
-    extract_embedding,
-    get_client,
-    parse_results,
-    upload_batch_file,
-    wait_for_batch,
-)
 from .data import load_documents, load_wikipedia_abstracts, save_documents
 from .index import build_index, load_index, save_index, search
-
-# Embedding models have different aliases
-MODELS = {
-    "qwen3-emb": "Qwen/Qwen3-Embedding-8B",
-    "text-emb-large": "text-embedding-3-large",
-    "text-emb-small": "text-embedding-3-small",
-}
-DEFAULT_MODEL = "qwen3-emb"
 
 
 @click.group()
 def cli():
-    """Batch embedding and semantic search via Doubleword Batch API.
+    """Batch embedding and semantic search via the Doubleword CLI.
 
-    Embed large document corpora affordably and build semantic search indices.
+    Prepare batch files, then use `dw stream` to submit and retrieve results.
     """
     pass
 
@@ -43,226 +29,210 @@ def cli():
 @click.option(
     "--limit", "-n", default=10000, help="Number of documents to load (default: 10000)"
 )
-@click.option("--output", "-o", default="data/documents.json", help="Output file path")
+@click.option("--output", "-o", default="batches/batch.jsonl", help="Output JSONL batch file")
 def prepare(limit: int, output: str):
-    """Download and prepare Wikipedia abstracts."""
+    """Download Wikipedia abstracts and generate an embedding batch JSONL.
+
+    The output file has no model set — use `dw files prepare --model <name>`
+    to set the model before submitting.
+    """
     click.echo(f"Loading Wikipedia abstracts (limit: {limit})...")
     docs = load_wikipedia_abstracts(limit=limit)
+    click.echo(f"Loaded {len(docs)} documents")
+
     output_path = Path(output)
-    save_documents(docs, output_path)
-    click.echo(f"Saved {len(docs)} documents to {output_path}")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Write batch-ready JSONL for embeddings (model intentionally omitted)
+    with open(output_path, "w") as f:
+        for i, doc in enumerate(docs):
+            line = {
+                "custom_id": f"emb-{i:06d}",
+                "method": "POST",
+                "url": "/v1/embeddings",
+                "body": {
+                    "input": doc["text"],
+                },
+            }
+            f.write(json.dumps(line) + "\n")
+
+    # Save documents for later index building and search
+    docs_path = output_path.parent / "documents.json"
+    save_documents(docs, docs_path)
+
+    click.echo(f"Created {output_path} ({len(docs)} requests)")
+    click.echo(f"Documents saved to {docs_path}")
 
 
-@cli.command()
+
+@cli.command("build-index")
 @click.option(
-    "--input",
-    "-i",
-    "input_path",
-    default="data/documents.json",
-    help="Input documents file",
-)
-@click.option("--output", "-o", default="results/", help="Output directory")
-@click.option(
-    "--model",
-    "-m",
-    default=DEFAULT_MODEL,
-    help="Model alias (qwen3-emb, text-emb-large, text-emb-small) or full name",
+    "--results",
+    "-r",
+    required=True,
+    help="Results JSONL file (from `dw stream` or `dw batches results`)",
 )
 @click.option(
-    "--provider",
-    "-p",
-    default="doubleword",
-    type=click.Choice(["doubleword", "openai"]),
+    "--documents",
+    "-d",
+    default="batches/documents.json",
+    help="Documents file from prepare step",
 )
-@click.option("--limit", "-n", default=0, help="Limit number of documents (0 = all)")
-@click.option("--dry-run", is_flag=True, help="Create batch file but don't submit")
-@click.option("--wait/--no-wait", default=True, help="Wait for batch completion")
-def run(
-    input_path: str,
-    output: str,
-    model: str,
-    provider: str,
-    limit: int,
-    dry_run: bool,
-    wait: bool,
-):
-    """Submit embedding batch for documents."""
-    model = MODELS.get(model, model)
+@click.option("--output", "-o", default="results/", help="Output directory for index")
+def build_index_cmd(results: str, documents: str, output: str):
+    """Build a search index from embedding results."""
+    results_path = Path(results)
+    docs_path = Path(documents)
 
-    input_file = Path(input_path)
-    if not input_file.exists():
-        raise click.ClickException(
-            f"Documents not found: {input_file}\nRun 'prepare' command first."
-        )
+    if not results_path.exists():
+        raise click.ClickException(f"Results file not found: {results_path}")
+    if not docs_path.exists():
+        raise click.ClickException(f"Documents file not found: {docs_path}")
 
-    docs = load_documents(input_file)
-    if limit > 0:
-        docs = docs[:limit]
+    docs = load_documents(docs_path)
 
-    click.echo(f"Loaded {len(docs)} documents from {input_file}")
+    # Parse results
+    batch_results = {}
+    with open(results_path) as f:
+        for line in f:
+            if line.strip():
+                obj = json.loads(line)
+                batch_results[obj["custom_id"]] = obj
 
-    texts = [doc["text"] for doc in docs]
+    click.echo(f"Loaded {len(batch_results)} embedding results")
 
-    output_dir = Path(output)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    model_slug = model.replace("/", "_")
+    # Determine embedding dimension from the first available result
+    dim = None
+    model_used = None
+    for obj in batch_results.values():
+        rb = obj.get("response_body") or obj.get("response", {}).get("body", {})
+        data = rb.get("data", [])
+        if data:
+            dim = len(data[0]["embedding"])
+            model_used = rb.get("model")
+            break
 
-    batch_file = output_dir / f"batch_{model_slug}_{timestamp}.jsonl"
-    create_batch_file(texts, model, batch_file)
-    click.echo(f"Created batch file: {batch_file} ({len(texts)} requests)")
+    if dim is None:
+        raise click.ClickException("No valid embedding results found — cannot determine dimension.")
 
-    if dry_run:
-        click.echo("Dry run - batch not submitted")
-        return
-
-    client, provider_name = get_client(provider)
-    click.echo(f"Using provider: {provider_name}")
-
-    click.echo("Uploading batch file...")
-    file_id = upload_batch_file(client, batch_file)
-    click.echo(f"  File ID: {file_id}")
-
-    click.echo("Creating batch...")
-    batch_id = create_batch(client, file_id)
-    click.echo(f"  Batch ID: {batch_id}")
-
-    metadata = {
-        "batch_id": batch_id,
-        "file_id": file_id,
-        "provider": provider_name,
-        "model": model,
-        "num_documents": len(docs),
-        "timestamp": timestamp,
-        "input_file": str(input_file),
-        "batch_file": str(batch_file),
-    }
-    metadata_file = output_dir / f"batch_{model_slug}_{timestamp}_meta.json"
-    with open(metadata_file, "w") as f:
-        json.dump(metadata, f, indent=2)
-    click.echo(f"Saved metadata: {metadata_file}")
-
-    if not wait:
-        click.echo(
-            f"\nBatch submitted. Check status with:\n"
-            f"  embeddings status --batch-id {batch_id}"
-        )
-        return
-
-    click.echo("\nWaiting for batch completion...")
-    batch = wait_for_batch(client, batch_id, poll_interval=15)
-
-    if batch.status != "completed":
-        raise click.ClickException(f"Batch failed with status: {batch.status}")
-
-    click.echo("Batch completed!")
-
-    results_file = output_dir / f"results_{model_slug}_{timestamp}.jsonl"
-    download_results(batch.output_file_id, results_file, provider=provider_name)
-    click.echo(f"Downloaded results: {results_file}")
-
-    # Extract embeddings and build index
-    click.echo("Extracting embeddings...")
-    results = parse_results(results_file)
+    # Extract embeddings in order, filling missing/errored with zeros
     embeddings = []
+    missing = 0
+    errors = 0
     for i in range(len(docs)):
         key = f"emb-{i:06d}"
-        if key in results:
-            embeddings.append(extract_embedding(results[key]))
-        else:
-            click.echo(f"  Warning: missing result for {key}")
-            embeddings.append([0.0] * 1024)
+        if key not in batch_results:
+            missing += 1
+            embeddings.append([0.0] * dim)
+            continue
 
-    dim = len(embeddings[0]) if embeddings else 1024
+        obj = batch_results[key]
+        if obj.get("error"):
+            errors += 1
+            embeddings.append([0.0] * dim)
+            continue
+
+        rb = obj.get("response_body") or obj.get("response", {}).get("body", {})
+        data = rb.get("data", [])
+        if not data or "embedding" not in data[0]:
+            errors += 1
+            embeddings.append([0.0] * dim)
+            continue
+
+        emb = data[0]["embedding"]
+        if len(emb) != dim:
+            raise click.ClickException(
+                f"Dimension mismatch at {key}: expected {dim}, got {len(emb)}"
+            )
+        embeddings.append(emb)
+
+    if missing > 0 or errors > 0:
+        click.echo(f"Warning: {missing} missing, {errors} errored embeddings (filled with zeros)")
+
     click.echo(f"Building HNSW index (dim={dim}, {len(embeddings)} vectors)...")
     index = build_index(embeddings, dim=dim)
 
-    index_path = output_dir / f"index_{model_slug}_{timestamp}.bin"
+    output_dir = Path(output)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    index_path = output_dir / "index.bin"
     save_index(index, index_path)
     click.echo(f"Saved index: {index_path}")
 
-    # Save embeddings for later use
-    emb_path = output_dir / f"embeddings_{model_slug}_{timestamp}.npy"
+    emb_path = output_dir / "embeddings.npy"
     np.save(str(emb_path), np.array(embeddings, dtype=np.float32))
     click.echo(f"Saved embeddings: {emb_path}")
 
-    # Update metadata
-    metadata["results_file"] = str(results_file)
-    metadata["index_file"] = str(index_path)
-    metadata["embeddings_file"] = str(emb_path)
-    metadata["output_file_id"] = batch.output_file_id
-    metadata["embedding_dim"] = dim
-    with open(metadata_file, "w") as f:
-        json.dump(metadata, f, indent=2)
-
-    tokens = count_tokens(results)
-    click.echo(f"\nTokens used: {tokens['input_tokens']:,} input")
-
-
-@cli.command()
-@click.option("--batch-id", required=True, help="Batch ID to check")
-@click.option(
-    "--provider",
-    "-p",
-    default="doubleword",
-    type=click.Choice(["doubleword", "openai"]),
-)
-def status(batch_id: str, provider: str):
-    """Check status of a running batch."""
-    client, _ = get_client(provider)
-    batch = client.batches.retrieve(batch_id)
-
-    click.echo(f"Batch ID: {batch.id}")
-    click.echo(f"Status: {batch.status}")
-    click.echo(
-        f"Progress: {batch.request_counts.completed}/{batch.request_counts.total}"
-    )
-    if batch.output_file_id:
-        click.echo(f"Output file: {batch.output_file_id}")
+    # Save metadata for search (including model so query uses the same one)
+    meta = {
+        "documents_file": str(docs_path),
+        "index_file": str(index_path),
+        "embeddings_file": str(emb_path),
+        "embedding_dim": dim,
+        "num_documents": len(docs),
+    }
+    if model_used:
+        meta["model"] = model_used
+    meta_path = output_dir / "index_meta.json"
+    with open(meta_path, "w") as f:
+        json.dump(meta, f, indent=2)
+    click.echo(f"Saved metadata: {meta_path}")
+    if model_used:
+        click.echo(f"Corpus model: {model_used}")
 
 
 @cli.command("search")
 @click.option("--query", "-q", required=True, help="Search query text")
-@click.option(
-    "--output", "-o", default="results/", help="Results directory containing index"
-)
-@click.option(
-    "--model", "-m", default=DEFAULT_MODEL, help="Model to use for query embedding"
-)
-@click.option(
-    "--provider",
-    "-p",
-    default="doubleword",
-    type=click.Choice(["doubleword", "openai"]),
-)
+@click.option("--results-dir", "-o", default="results/", help="Directory containing index")
 @click.option("--top-k", "-k", default=10, help="Number of results to return")
-def search_cmd(query: str, output: str, model: str, provider: str, top_k: int):
-    """Search the embedded document corpus."""
-    model = MODELS.get(model, model)
-    output_dir = Path(output)
+def search_cmd(query: str, results_dir: str, top_k: int):
+    """Search the embedded document corpus.
 
-    meta_files = sorted(output_dir.glob("batch_*_meta.json"))
-    if not meta_files:
+    Embeds the query via the Doubleword inference API using the same model
+    that was used for the corpus. Requires DOUBLEWORD_API_KEY in environment
+    (automatically set by `dw project run`).
+    """
+    import os
+
+    from openai import OpenAI
+
+    output_dir = Path(results_dir)
+    meta_path = output_dir / "index_meta.json"
+
+    if not meta_path.exists():
         raise click.ClickException(
-            f"No index found in {output_dir}. Run 'embeddings run' first."
+            f"No index found in {output_dir}. Run `build-index` first."
         )
 
-    with open(meta_files[-1]) as f:
+    with open(meta_path) as f:
         metadata = json.load(f)
 
-    index_file = metadata.get("index_file")
-    if not index_file or not Path(index_file).exists():
-        raise click.ClickException("Index file not found. Run 'embeddings run' first.")
-
+    index_file = metadata["index_file"]
     dim = metadata.get("embedding_dim", 1024)
     index = load_index(Path(index_file), dim=dim)
 
-    docs = load_documents(Path(metadata["input_file"]))
+    docs = load_documents(Path(metadata["documents_file"]))
 
     # Get query embedding via realtime API
-    client, _ = get_client(provider)
-    click.echo(f"Embedding query: {query!r}")
-    response = client.embeddings.create(model=model, input=query)
+    api_key = os.environ.get("DOUBLEWORD_API_KEY")
+    if not api_key:
+        raise click.ClickException(
+            "DOUBLEWORD_API_KEY not set. Run `export DOUBLEWORD_API_KEY=$(dw keys create --name search --output plain)`"
+        )
+
+    model = metadata.get("model")
+    if not model:
+        raise click.ClickException(
+            "No model recorded in index metadata. Rebuild the index from results "
+            "that include model info (the model is extracted from the batch response)."
+        )
+
+    client = OpenAI(base_url="https://api.doubleword.ai/v1", api_key=api_key)
+    click.echo(f"Embedding query with {model}: {query!r}")
+    response = client.embeddings.create(
+        model=model,
+        input=query,
+    )
     query_emb = response.data[0].embedding
 
     results = search(index, query_emb, k=top_k)
@@ -277,43 +247,16 @@ def search_cmd(query: str, output: str, model: str, provider: str, top_k: int):
             click.echo()
 
 
-@cli.command()
-@click.option("--output", "-o", default="results/", help="Results directory")
-def analyze(output: str):
-    """Analyze embedding results and token usage."""
-    output_dir = Path(output)
-
-    meta_files = sorted(output_dir.glob("batch_*_meta.json"))
-    if not meta_files:
-        raise click.ClickException(f"No results found in {output_dir}")
-
-    for meta_file in meta_files:
-        with open(meta_file) as f:
-            metadata = json.load(f)
-
-        click.echo(f"\n{'=' * 50}")
-        click.echo(f"Model: {metadata['model']}")
-        click.echo(f"Documents: {metadata['num_documents']}")
-        click.echo(f"Timestamp: {metadata['timestamp']}")
-
-        results_file = metadata.get("results_file")
-        if results_file and Path(results_file).exists():
-            results = parse_results(Path(results_file))
-            tokens = count_tokens(results)
-            click.echo(f"Input tokens: {tokens['input_tokens']:,}")
-
-            sample = next(iter(results.values()))
-            emb = extract_embedding(sample)
-            click.echo(f"Embedding dimension: {len(emb)}")
-            click.echo(f"Results count: {len(results)}")
-
-        if metadata.get("index_file") and Path(metadata["index_file"]).exists():
-            click.echo(f"Index: {metadata['index_file']}")
-        click.echo()
-
-
 def main():
+    # Run the CLI normally. If the HuggingFace `datasets` library was
+    # imported (by the prepare command), it spawns background threads that
+    # block shutdown. In that case, force-exit after cli() returns
+    # successfully. On errors, let the exception propagate normally so
+    # the exit code is preserved.
     cli()
+    if "datasets" in sys.modules:
+        import os
+        os._exit(0)
 
 
 if __name__ == "__main__":

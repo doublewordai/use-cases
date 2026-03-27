@@ -1,0 +1,26 @@
+[project]
+name = "bug-detection-ensemble"
+setup = "uv sync"
+workflow = [
+    "dw project setup",
+    "dw project run fetch-data",
+    "dw project run prepare",
+    "dw files stats batches/classify.jsonl",
+    "dw files prepare batches/classify.jsonl --model Qwen/Qwen3-VL-30B-A3B-Instruct-FP8",
+    "dw batches run batches/classify.jsonl --watch --output-id .batch-id",
+    "dw batches results $(cat .batch-id) -o results/classify.jsonl",
+    "dw project run analyze -- -r results/classify.jsonl",
+    "dw batches analytics $(cat .batch-id)",
+]
+
+[steps.fetch-data]
+description = "Download CVEfixes database from Zenodo (~2GB)"
+run = "uv run bug-ensemble fetch-cvefixes"
+
+[steps.prepare]
+description = "Load CVEfixes dataset and generate classification batch JSONL"
+run = "uv run bug-ensemble classify"
+
+[steps.analyze]
+description = "Analyze CWE classification results"
+run = "uv run bug-ensemble classify-analyze"

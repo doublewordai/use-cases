@@ -41,7 +41,7 @@ MODELS = {
     "gpt5.2": "gpt-5.2",
 }
 DEFAULT_MODEL = "30b"
-MAX_ITERATIONS = 25
+MAX_ITERATIONS = 15
 
 
 def _run_batch(
@@ -351,32 +351,55 @@ def report(output: str):
     if not output_dir.exists():
         raise click.ClickException(f"No results directory found: {output_dir}")
 
+    found = False
     for topic_dir in sorted(output_dir.iterdir()):
         if not topic_dir.is_dir():
             continue
         report_path = topic_dir / "report.md"
         summary_path = topic_dir / "summary.json"
+        agent_tree_path = topic_dir / "agent-tree.json"
 
-        if report_path.exists() and summary_path.exists():
-            with open(summary_path) as f:
-                summary = json.load(f)
+        if not summary_path.exists():
+            continue
 
-            click.echo(f"\n{'=' * 60}")
-            click.echo(f"Topic: {summary['topic']}")
-            click.echo(f"Model: {summary['model']}")
-            click.echo(
-                f"Agents: {summary['total_agents']} ({summary['agents_completed']} completed)"
-            )
-            click.echo(f"Max depth: {summary['max_depth']}")
-            click.echo(f"Batch rounds: {summary['batch_rounds']}")
-            click.echo(
-                f"Tokens: {summary['tokens']['input_tokens']:,} in / "
-                f"{summary['tokens']['output_tokens']:,} out"
-            )
-            click.echo(f"{'=' * 60}\n")
+        with open(summary_path) as f:
+            summary = json.load(f)
 
+        click.echo(f"\n{'=' * 60}")
+        click.echo(f"Topic: {summary['topic']}")
+        click.echo(f"Model: {summary['model']}")
+        click.echo(
+            f"Agents: {summary['total_agents']} ({summary['agents_completed']} completed)"
+        )
+        click.echo(f"Max depth: {summary['max_depth']}")
+        click.echo(f"Batch rounds: {summary['batch_rounds']}")
+        click.echo(
+            f"Tokens: {summary['tokens']['input_tokens']:,} in / "
+            f"{summary['tokens']['output_tokens']:,} out"
+        )
+        click.echo(f"{'=' * 60}\n")
+
+        if report_path.exists():
             with open(report_path) as f:
                 click.echo(f.read())
+            found = True
+        else:
+            # No report — explain why
+            click.echo("No report generated. The root agent did not call write_report.")
+            if agent_tree_path.exists():
+                with open(agent_tree_path) as f:
+                    agents = json.load(f)
+                root = next((a for a in agents if a.get("is_root")), None)
+                if root:
+                    click.echo(f"Root agent status: {root['status']} (after {root['iterations']} iterations)")
+                failed = [a for a in agents if a["status"] == "failed"]
+                if failed:
+                    click.echo(f"Failed agents: {len(failed)}/{len(agents)}")
+            click.echo(f"\nCheck {topic_dir}/agent-tree.json for details.")
+            found = True
+
+    if not found:
+        click.echo("No completed research runs found in results/.")
 
 
 def main():

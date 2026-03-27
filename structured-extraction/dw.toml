@@ -1,0 +1,20 @@
+[project]
+name = "structured-extraction"
+setup = "uv sync"
+workflow = [
+    "dw project setup",
+    "dw project run prepare -- -i data/sroie/receipts.jsonl -m Qwen/Qwen3-VL-30B-A3B-Instruct-FP8 -n 1 -o batches",
+    "dw files stats batches/batch_30b_n1.jsonl",
+    "dw batches run batches/batch_30b_n1.jsonl --watch --output-id .batch-id",
+    "dw batches results $(cat .batch-id) -o results/results.jsonl",
+    "dw project run analyze -- -i data/sroie/receipts.jsonl -r results/",
+    "dw batches analytics $(cat .batch-id)",
+]
+
+[steps.prepare]
+description = "Load receipts and generate extraction batch JSONL (download SROIE first: uv run python -m src.sroie)"
+run = "uv run structured-extraction run --dry-run"
+
+[steps.analyze]
+description = "Analyze extraction accuracy with ensemble voting"
+run = "uv run structured-extraction analyze"

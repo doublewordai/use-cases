@@ -218,6 +218,20 @@ def prepare(input_path: str, output_dir: str, num_images: int):
         batch_files.append(batch_file)
         click.echo(f"  {batch_file} ({size_mb:.1f} MB, {len(chunk)} requests)")
 
+    # Save index mapping so analyze() can map groups back to images correctly
+    # (accounting for skipped images during fetch)
+    mapping = []
+    for group_start in range(0, len(valid_images), IMAGES_PER_REQUEST):
+        group = valid_images[group_start : group_start + IMAGES_PER_REQUEST]
+        group_idx = group_start // IMAGES_PER_REQUEST
+        for pos, (orig_idx, _, _, _) in enumerate(group):
+            mapping.append({"group": f"group-{group_idx:05d}", "position": pos, "orig_idx": orig_idx})
+
+    mapping_path = output_dir / "image_mapping.json"
+    with open(mapping_path, "w") as f:
+        json.dump(mapping, f)
+    click.echo(f"Saved image mapping to {mapping_path}")
+
     click.echo(f"\nCreated {len(batch_files)} batch files in {output_dir}/")
     click.echo(
         f"\nNext steps:\n"
@@ -306,19 +320,64 @@ def analyze(input_path: str, results: str, output_file: str, num_images: int):
 
     click.echo(f"Summaries extracted: {len(summaries)}")
 
-    # Build output CSV
-    out_df = df[
-        ["photo_image_url", "photo_description", "photographer_username"]
-    ].copy()
+    # Parse numbered summaries from group responses into per-image summaries
+    def parse_numbered_summaries(text: str, expected: int) -> list[str]:
+        """Split '1. ... 2. ... 3. ...' into individual summaries."""
+        import re
+        parts = re.split(r'\n\s*\d+\.\s+', "\n" + text)
+        # First split element is empty (before "1.")
+        parts = [p.strip() for p in parts if p.strip()]
+        # Pad or truncate to expected count
+        while len(parts) < expected:
+            parts.append("")
+        return parts[:expected]
 
-    # Map group summaries back to individual images
-    summary_col = []
-    for idx in range(len(df)):
-        group_idx = idx // IMAGES_PER_REQUEST
-        cid = f"group-{group_idx:05d}"
-        summary_col.append(summaries.get(cid, ""))
+    # Load image mapping from prepare step
+    mapping_path = Path(input_path).parent / ".." / "batches" / "image_mapping.json"
+    # Try a few reasonable locations
+    for candidate in [
+        Path("batches/image_mapping.json"),
+        Path(input_path).parent / "image_mapping.json",
+    ]:
+        if candidate.exists():
+            mapping_path = candidate
+            break
 
-    out_df["summary"] = summary_col
+    if mapping_path.exists():
+        with open(mapping_path) as f:
+            mapping = json.load(f)
+
+        # Build per-image summaries using the mapping
+        per_image = {}
+        # Group mapping entries by group
+        from collections import defaultdict
+        groups = defaultdict(list)
+        for entry in mapping:
+            groups[entry["group"]].append(entry)
+
+        for group_id, entries in groups.items():
+            group_text = summaries.get(group_id, "")
+            parsed = parse_numbered_summaries(group_text, len(entries))
+            for entry, summary in zip(entries, parsed):
+                per_image[entry["orig_idx"]] = summary
+
+        # Build output CSV using the mapping
+        out_df = df[
+            ["photo_image_url", "photo_description", "photographer_username"]
+        ].copy()
+        summary_col = [per_image.get(idx, "") for idx in range(len(df))]
+        out_df["summary"] = summary_col
+    else:
+        click.echo("Warning: image_mapping.json not found, falling back to positional mapping")
+        out_df = df[
+            ["photo_image_url", "photo_description", "photographer_username"]
+        ].copy()
+        summary_col = []
+        for idx in range(len(df)):
+            group_idx = idx // IMAGES_PER_REQUEST
+            cid = f"group-{group_idx:05d}"
+            summary_col.append(summaries.get(cid, ""))
+        out_df["summary"] = summary_col
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     out_df.to_csv(output_path, index=False)

@@ -100,7 +100,21 @@ def build_index_cmd(results: str, documents: str, output: str):
 
     click.echo(f"Loaded {len(batch_results)} embedding results")
 
-    # Extract embeddings in order
+    # Determine embedding dimension from the first available result
+    dim = None
+    model_used = None
+    for obj in batch_results.values():
+        rb = obj.get("response_body") or obj.get("response", {}).get("body", {})
+        data = rb.get("data", [])
+        if data:
+            dim = len(data[0]["embedding"])
+            model_used = rb.get("model")
+            break
+
+    if dim is None:
+        raise click.ClickException("No valid embedding results found — cannot determine dimension.")
+
+    # Extract embeddings in order, filling missing with zeros at the correct dimension
     embeddings = []
     missing = 0
     for i in range(len(docs)):
@@ -108,15 +122,18 @@ def build_index_cmd(results: str, documents: str, output: str):
         if key in batch_results:
             rb = batch_results[key].get("response_body") or batch_results[key].get("response", {}).get("body", {})
             emb = rb["data"][0]["embedding"]
+            if len(emb) != dim:
+                raise click.ClickException(
+                    f"Dimension mismatch at {key}: expected {dim}, got {len(emb)}"
+                )
             embeddings.append(emb)
         else:
             missing += 1
-            embeddings.append([0.0] * 1024)
+            embeddings.append([0.0] * dim)
 
     if missing > 0:
         click.echo(f"Warning: {missing} missing embeddings (filled with zeros)")
 
-    dim = len(embeddings[0]) if embeddings else 1024
     click.echo(f"Building HNSW index (dim={dim}, {len(embeddings)} vectors)...")
     index = build_index(embeddings, dim=dim)
 
@@ -131,7 +148,7 @@ def build_index_cmd(results: str, documents: str, output: str):
     np.save(str(emb_path), np.array(embeddings, dtype=np.float32))
     click.echo(f"Saved embeddings: {emb_path}")
 
-    # Save metadata for search
+    # Save metadata for search (including model so query uses the same one)
     meta = {
         "documents_file": str(docs_path),
         "index_file": str(index_path),
@@ -139,10 +156,14 @@ def build_index_cmd(results: str, documents: str, output: str):
         "embedding_dim": dim,
         "num_documents": len(docs),
     }
+    if model_used:
+        meta["model"] = model_used
     meta_path = output_dir / "index_meta.json"
     with open(meta_path, "w") as f:
         json.dump(meta, f, indent=2)
     click.echo(f"Saved metadata: {meta_path}")
+    if model_used:
+        click.echo(f"Corpus model: {model_used}")
 
 
 @cli.command("search")
@@ -183,10 +204,17 @@ def search_cmd(query: str, results_dir: str, top_k: int):
             "DOUBLEWORD_API_KEY not set. Run `export DOUBLEWORD_API_KEY=$(dw keys create --name search --output plain)`"
         )
 
+    model = metadata.get("model")
+    if not model:
+        raise click.ClickException(
+            "No model recorded in index metadata. Rebuild the index from results "
+            "that include model info, or pass the model manually."
+        )
+
     client = OpenAI(base_url="https://api.doubleword.ai/v1", api_key=api_key)
-    click.echo(f"Embedding query: {query!r}")
+    click.echo(f"Embedding query with {model}: {query!r}")
     response = client.embeddings.create(
-        model=metadata.get("model", "Qwen/Qwen3-Embedding-8B"),
+        model=model,
         input=query,
     )
     query_emb = response.data[0].embedding
@@ -204,13 +232,24 @@ def search_cmd(query: str, results_dir: str, top_k: int):
 
 
 def main():
-    # Register a hard exit as the very last atexit handler.
-    # The HuggingFace datasets library registers finalizers that block
-    # on background threads during shutdown. This ensures clean exit.
-    import atexit
-    import os
-    atexit.register(os._exit, 0)
-    cli()
+    exit_code = 0
+    try:
+        cli(standalone_mode=False)
+    except SystemExit as e:
+        exit_code = e.code if isinstance(e.code, int) else 1
+    except click.ClickException as e:
+        e.show()
+        exit_code = e.exit_code
+    except Exception as e:
+        click.echo(f"Error: {e}", err=True)
+        exit_code = 1
+    finally:
+        # The HuggingFace datasets library spawns background threads that
+        # block normal shutdown. Force exit after the CLI completes, but
+        # preserve the real exit code.
+        import os
+
+        os._exit(exit_code)
 
 
 if __name__ == "__main__":

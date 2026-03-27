@@ -114,7 +114,7 @@ Or run each step manually for more control:
 Generate the batch file. This downloads GSM8K and creates a JSONL file with all the evaluation prompts (no model set yet):
 
 ```bash
-dw project run prepare -n 100     # 100 questions for a quick test
+dw project run prepare -- -n 100     # 100 questions for a quick test
 ```
 
 Inspect and prepare the file:
@@ -142,7 +142,7 @@ dw batches results <batch-id> -o results.jsonl
 Score the results against ground truth:
 
 ```bash
-dw project run analyze -r results.jsonl
+dw project run analyze -- -r results.jsonl
 ```
 
 Check what the run cost (the batch ID is printed by `dw stream`):
@@ -167,23 +167,9 @@ wait
 
 # Compare
 dw files diff results-30b.jsonl results-235b.jsonl
-dw project run analyze -r results-30b.jsonl
-dw project run analyze -r results-235b.jsonl
+dw project run analyze -- -r results-30b.jsonl
+dw project run analyze -- -r results-235b.jsonl
 ```
-
-### Alternative: Python SDK directly
-
-If you prefer to use the Python SDK without the CLI:
-
-```bash
-cd model-evals && uv sync
-export DOUBLEWORD_API_KEY="your-key"
-uv run model-evals run --model 235b
-uv run model-evals status
-uv run model-evals score -r <results-file>
-```
-
-The `--model` flag accepts aliases (`235b`, `30b`, `gpt5.2`, `gpt5-mini`, `gpt5-nano`) or full model names.
 
 ## Limitations
 

@@ -102,8 +102,8 @@ def prepare(limit: int | None, output: str):
 @click.option(
     "--dataset",
     "-d",
-    default="batches/ground_truth.json",
-    help="Ground truth dataset file",
+    default=None,
+    help="Ground truth dataset file (default: batches/ground_truth.json)",
 )
 @click.option(
     "--output",
@@ -111,10 +111,14 @@ def prepare(limit: int | None, output: str):
     default="results/",
     help="Output directory for scored results",
 )
-def score(results: str, dataset: str, output: str):
+def score(results: str, dataset: str | None, output: str):
     """Score batch results against ground truth."""
     results_path = Path(results)
-    dataset_path = Path(dataset)
+
+    if dataset is None:
+        dataset_path = Path("batches/ground_truth.json")
+    else:
+        dataset_path = Path(dataset)
 
     if not results_path.exists():
         raise click.ClickException(f"Results file not found: {results_path}")

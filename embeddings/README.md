@@ -124,7 +124,7 @@ Or run each step manually for more control:
 Generate the embedding batch. This downloads Wikipedia abstracts and creates a JSONL file:
 
 ```bash
-dw project run prepare -n 10000
+dw project run prepare -- -n 10000
 ```
 
 Inspect and set the model:
@@ -143,13 +143,13 @@ dw stream batches/batch.jsonl > results/embeddings.jsonl
 Build the search index from the results:
 
 ```bash
-dw project run build-index -r results/embeddings.jsonl
+dw project run build-index -- -r results/embeddings.jsonl
 ```
 
 Search:
 
 ```bash
-dw project run search -q "how do black holes form"
+dw project run search -- -q "how do black holes form"
 ```
 
 Check what it cost (the batch ID is printed by `dw stream`):

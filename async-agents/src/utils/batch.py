@@ -106,7 +106,7 @@ def upload_batch_file(client: OpenAI, file_path: Path) -> str:
 
 
 @_with_retries
-def create_batch(client: OpenAI, file_id: str, completion_window: str = "24h") -> str:
+def create_batch(client: OpenAI, file_id: str, completion_window: str = "1h") -> str:
     """Create batch and return batch ID."""
     batch = client.batches.create(
         input_file_id=file_id,

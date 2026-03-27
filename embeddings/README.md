@@ -2,7 +2,7 @@
 
 Vector embeddings power semantic search, RAG pipelines, and recommendation systems, but generating them at scale gets expensive. We embedded a document corpus using Doubleword's batch API for \$0.03, compared to \$0.21 on OpenAI's realtime API or \$0.10 on OpenAI's batch API. Since embedding is a single-batch operation with no sequential dependencies, the 24-hour SLA is fine here, and the cost savings are substantial.
 
-To run this yourself, sign up at [app.doubleword.ai](https://app.doubleword.ai) and generate an API key.
+To run this yourself, install the [dw CLI](https://github.com/doublewordai/dw) and `dw login`, or sign up at [app.doubleword.ai](https://app.doubleword.ai).
 
 ## Why This Matters
 
@@ -102,44 +102,82 @@ The key insight for batch embedding is that all documents are independent. The e
 
 ## Running It Yourself
 
-Set up your environment:
+### Using the Doubleword CLI
+
+Clone, setup, and see the full workflow:
+
+```bash
+dw examples clone embeddings
+cd embeddings
+dw project setup
+dw project info
+```
+
+The fastest way to run everything end-to-end:
+
+```bash
+dw project run-all
+```
+
+Or run each step manually for more control:
+
+Generate the embedding batch. This downloads Wikipedia abstracts and creates a JSONL file:
+
+```bash
+dw project run prepare -n 10000
+```
+
+Inspect and set the model:
+
+```bash
+dw files stats batches/batch.jsonl
+dw files prepare batches/batch.jsonl --model Qwen/Qwen3-Embedding-8B
+```
+
+Submit and stream results:
+
+```bash
+dw stream batches/batch.jsonl > results/embeddings.jsonl
+```
+
+Build the search index from the results:
+
+```bash
+dw project run build-index -r results/embeddings.jsonl
+```
+
+Search:
+
+```bash
+dw project run search -q "how do black holes form"
+```
+
+Check what it cost (the batch ID is printed by `dw stream`):
+
+```bash
+dw batches analytics <batch-id>
+```
+
+#### Sample first, then scale
+
+For a quick test before embedding the full corpus:
+
+```bash
+dw files sample batches/batch.jsonl -n 100 -o batches/sample.jsonl
+dw files prepare batches/sample.jsonl --model Qwen/Qwen3-Embedding-8B
+dw stream batches/sample.jsonl > results/sample.jsonl
+```
+
+### Alternative: Python SDK directly
 
 ```bash
 cd embeddings && uv sync
 export DOUBLEWORD_API_KEY="your-key"
+uv run embeddings prepare --limit 10000
+# Then use dw stream for submission, or modify the code to use the OpenAI SDK directly
 ```
 
-Download and prepare the Wikipedia abstracts (streamed from HuggingFace, no API key needed):
-
-```bash
-uv run embeddings prepare --limit 100000
-```
-
-Submit the embedding batch:
-
-```bash
-uv run embeddings run -m qwen3-emb
-```
-
-Check batch status:
-
-```bash
-uv run embeddings status --batch-id <batch-id>
-```
-
-Once complete, run semantic search queries:
-
-```bash
-uv run embeddings search --query "how do black holes form"
-```
-
-Analyze results and token usage:
-
-```bash
-uv run embeddings analyze
-```
-
-The `results/` directory contains the raw embeddings, the built index, and evaluation metrics.
+The `results/` directory contains the raw embeddings, the built HNSW index, and search metadata.
 
 ## Limitations
 

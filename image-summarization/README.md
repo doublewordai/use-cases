@@ -4,7 +4,7 @@
 
 Writing alt-text, social media captions, or content descriptions for a large image library is the kind of work that is either done manually (expensive, slow) or not done at all. Vision-language models can generate reasonable image summaries, but the economics only work at scale when inference is cheap enough to run against thousands of images without thinking about the cost. We ran Qwen3-VL-235B against 1,000 Unsplash photographs via the Doubleword Batch API and generated social media-style summaries for \$0.10 total, roughly \$0.0001 per image.
 
-To run this yourself, sign up at [app.doubleword.ai](https://app.doubleword.ai) and generate an API key.
+To run this yourself, install the [dw CLI](https://github.com/doublewordai/dw) and `dw login`, or sign up at [app.doubleword.ai](https://app.doubleword.ai).
 
 Note: This can be done for ~\$0.05 using the smaller Qwen3-VL-30B model.
 
@@ -54,45 +54,78 @@ The cost difference grows linearly. At 100,000 images, the gap between Qwen3-30B
 
 ## Replication
 
-### Setup
+### Using the Doubleword CLI
+
+Install the [dw CLI](https://github.com/doublewordai/dw) and log in:
 
 ```bash
-cd image-summarization && uv sync
+dw login
 ```
+
+Clone, setup, and see the full workflow:
+
+```bash
+dw examples clone image-summarization
+cd image-summarization
+dw project setup
+dw project info
+```
+
+The fastest way to run everything end-to-end:
+
+```bash
+dw project run-all
+```
+
+Or run each step manually for more control:
 
 Download the [Unsplash Lite dataset](https://github.com/unsplash/datasets) and extract it so that `unsplash-research-dataset-lite-latest/photos.csv000` exists in this directory.
 
-### Running summarization
-
-Set your API key and submit a batch:
+Fetch images, encode to base64, and generate batch JSONL files:
 
 ```bash
-export DOUBLEWORD_API_KEY="your-key"
-uv run image-summarization run -i unsplash-research-dataset-lite-latest/photos.csv000 -m 235b -n 1000
+dw project run prepare -- -i unsplash-research-dataset-lite-latest/photos.csv000 -n 1000
 ```
 
-The `-m 235b` flag selects Qwen3-VL-235B. Use `-m 30b` for the smaller model, or any model alias from the standard set.
-
-Check status and download results:
+This creates multiple batch files in `batches/` (vision requests are large, so they're split across files). Inspect and set the model:
 
 ```bash
-uv run image-summarization status
+dw files stats batches/batch_00.jsonl
+dw files prepare batches/ --model Qwen/Qwen3-VL-235B-A22B-Instruct-FP8
 ```
 
-Combine results into a CSV:
+Submit all batch files and watch progress:
 
 ```bash
-uv run image-summarization analyze -i unsplash-research-dataset-lite-latest/photos.csv000
+dw batches run batches/ --watch
 ```
 
-This produces `results/summaries.csv` with columns for the image URL, original description, photographer, and the generated summary.
-
-### Preview without submitting
-
-Use `--dry-run` to prepare the batch file without uploading:
+Or use `dw stream` to pipe results directly:
 
 ```bash
-uv run image-summarization run -i unsplash-research-dataset-lite-latest/photos.csv000 --dry-run
+dw stream batches/ > results/summaries.jsonl
+```
+
+Parse results into a CSV:
+
+```bash
+dw project run analyze -- -i unsplash-research-dataset-lite-latest/photos.csv000 -r results/summaries.jsonl
+```
+
+This produces `results/summaries.csv` with the image URL, original description, photographer, and generated summary.
+
+Check what it cost (batch IDs are printed by `dw batches run`):
+
+```bash
+dw batches analytics <batch-id>
+```
+
+#### Test with a small sample first
+
+```bash
+dw files sample batches/batch_00.jsonl -n 5 -o batches/test.jsonl
+dw files prepare batches/test.jsonl --model Qwen/Qwen3-VL-30B-A3B-Instruct-FP8
+dw stream batches/test.jsonl > results/test.jsonl
 ```
 
 ## Conclusion

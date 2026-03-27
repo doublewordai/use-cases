@@ -1,0 +1,19 @@
+[project]
+name = "model-evals"
+setup = "uv sync"
+workflow = [
+    "dw project setup",
+    "dw project run prepare -- -n 100",
+    "dw files stats batches/batch.jsonl",
+    "dw files prepare batches/batch.jsonl --model Qwen/Qwen3-VL-30B-A3B-Instruct-FP8",
+    "dw stream batches/batch.jsonl > results.jsonl",
+    "dw project run analyze -- -r results.jsonl",
+]
+
+[steps.prepare]
+description = "Download GSM8K and generate batch JSONL (no model set)"
+run = "uv run model-evals prepare"
+
+[steps.analyze]
+description = "Score model answers against ground truth"
+run = "uv run model-evals score"

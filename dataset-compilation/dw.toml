@@ -1,0 +1,43 @@
+[project]
+name = "dataset-compilation"
+setup = "uv sync"
+workflow = [
+    "dw project setup",
+    "dw project run generate-queries -- --topic \"datacenter networking hardware\"",
+    "dw project run search -- -i queries.json",
+    "dw project run extract -- -i search_results.json",
+    "dw project run dedupe -- -i companies_raw.json -o companies.json",
+    "dw project run filter -- -i companies.json",
+    "dw project run dedupe -- -i companies_filtered.json -o companies_final.json",
+    "dw project run validate -- -i companies_final.json",
+]
+
+
+
+[steps.generate-queries]
+description = "Generate diverse search queries by recursive LLM expansion"
+run = "uv run dataset-compilation generate-queries"
+
+[steps.search]
+description = "Run web search for generated queries (requires SERPER_API_KEY)"
+run = "uv run dataset-compilation search"
+
+[steps.extract]
+description = "Extract structured company data from search results via batch API"
+run = "uv run dataset-compilation extract"
+
+[steps.dedupe]
+description = "Deduplicate extracted records via batch API"
+run = "uv run dataset-compilation dedupe"
+
+[steps.filter]
+description = "Filter false positives using fresh web search + LLM classification"
+run = "uv run dataset-compilation filter"
+
+[steps.merge]
+description = "Merge results from multiple passes"
+run = "uv run dataset-compilation merge"
+
+[steps.validate]
+description = "Validate dataset against ground truth"
+run = "uv run dataset-compilation validate"

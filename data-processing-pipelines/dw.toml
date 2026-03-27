@@ -1,0 +1,21 @@
+[project]
+name = "data-processing-pipelines"
+setup = "uv sync"
+workflow = [
+    "dw project setup",
+    "dw project run prepare -- --limit 500",
+    "dw project run pipeline -- -m Qwen/Qwen3-VL-30B-A3B-Instruct-FP8",
+    "dw project run analyze",
+]
+
+[steps.prepare]
+description = "Download SEC EDGAR company data (or load your own CSV with --input)"
+run = "uv run data-pipelines prepare"
+
+[steps.pipeline]
+description = "Run the full normalize -> deduplicate -> enrich pipeline"
+run = "uv run data-pipelines run"
+
+[steps.analyze]
+description = "Analyze pipeline results and print summary statistics"
+run = "uv run data-pipelines analyze"

@@ -1,0 +1,21 @@
+[project]
+name = "synthetic-data-generation"
+setup = "uv sync"
+workflow = [
+    "dw project setup",
+    "dw project run generate -- -m Qwen/Qwen3-VL-30B-A3B-Instruct-FP8 -n 1000",
+    "dw project run analyze",
+    "dw project run export",
+]
+
+[steps.generate]
+description = "Run the three-stage pipeline (scenarios -> conversations -> quality scoring)"
+run = "uv run synthetic-data run"
+
+[steps.analyze]
+description = "Analyze generated data quality and score distribution"
+run = "uv run synthetic-data analyze"
+
+[steps.export]
+description = "Export filtered training data in fine-tuning JSONL format"
+run = "uv run synthetic-data export"

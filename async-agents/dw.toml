@@ -1,0 +1,16 @@
+[project]
+name = "async-agents"
+setup = "uv sync"
+workflow = [
+    "dw project setup",
+    "dw project run research -- --topic \"quantum computing error correction\" -m Qwen/Qwen3-VL-30B-A3B-Instruct-FP8",
+    "dw project run report",
+]
+
+[steps.research]
+description = "Run the recursive multi-agent research orchestrator"
+run = "uv run async-agents run"
+
+[steps.report]
+description = "View the generated research report"
+run = "uv run async-agents report"

@@ -1,0 +1,21 @@
+[project]
+name = "image-summarization"
+setup = "uv sync"
+workflow = [
+    "dw project setup",
+    "# Download the Unsplash Lite dataset: https://github.com/unsplash/datasets",
+    "dw project run prepare -- -i unsplash-research-dataset-lite-latest/photos.csv000 -n 1000",
+    "dw files stats batches/batch_00.jsonl",
+    "dw files prepare batches/ --model Qwen/Qwen3-VL-30B-A3B-Instruct-FP8",
+    "dw batches run batches/ --watch",
+    "dw batches results <batch-id> -o results/summaries.jsonl",
+    "dw project run analyze -- -i unsplash-research-dataset-lite-latest/photos.csv000 -r results/summaries.jsonl",
+]
+
+[steps.prepare]
+description = "Fetch images, encode to base64, and generate batch JSONL files"
+run = "uv run image-summarization prepare"
+
+[steps.analyze]
+description = "Parse results and create summaries CSV"
+run = "uv run image-summarization analyze"

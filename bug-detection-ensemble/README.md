@@ -4,7 +4,7 @@ Classification is everywhere: categorizing support tickets, labeling documents, 
 
 We tested this on a hard problem—classifying security vulnerabilities by type—using 4,642 real vulnerabilities from CVEfixes. Qwen3-30B achieved 46.5% accuracy on grouped classification (Memory Safety, Pointer, Integer, etc.) at a cost of \$0.40. Running twice and using agreement as a calibration signal pushes accuracy to 66% on the 58% of samples where both runs agree.
 
-To run this yourself, sign up at [app.doubleword.ai](https://app.doubleword.ai) and generate an API key.
+To run this yourself, install the [dw CLI](https://github.com/doublewordai/dw) and `dw login`, or sign up at [app.doubleword.ai](https://app.doubleword.ai).
 
 ## Why This Matters
 
@@ -80,25 +80,65 @@ The model over-predicts CWE-125, the most common class in the dataset. These con
 
 ## Replication
 
+### Using the Doubleword CLI
+
+Install the [dw CLI](https://github.com/doublewordai/dw) and log in:
+
 ```bash
+dw login
+```
+
+Clone, setup, and see the full workflow:
+
+```bash
+dw examples clone bug-detection-ensemble
 cd bug-detection-ensemble
-uv sync
+dw project setup
+dw project info
+```
 
-# Download CVEfixes (~2GB SQLite database)
+The fastest way to run everything end-to-end:
+
+```bash
+dw project run-all
+```
+
+Or run each step manually for more control:
+
+Download the CVEfixes database (~2GB SQLite):
+
+```bash
 uv run bug-ensemble fetch-cvefixes
+```
 
-# Set API key
-export DOUBLEWORD_API_KEY="your-key"
+Run classification (submits a batch via the Doubleword API):
 
-# Run classification
-uv run bug-ensemble classify -m 30b -o results/run1
-uv run bug-ensemble classify -m 30b -o results/run2
+```bash
+dw project run prepare -- -m Qwen/Qwen3-VL-30B-A3B-Instruct-FP8
+```
 
-# Check batch status
-uv run bug-ensemble status -o results/run1 --wait
+For calibration, run twice:
 
-# Analyze results
-uv run bug-ensemble classify-analyze -o results/run1
+```bash
+uv run bug-ensemble classify -m Qwen/Qwen3-VL-30B-A3B-Instruct-FP8 -o results/run2
+```
+
+Check batch status and download results:
+
+```bash
+dw project run classify-status
+```
+
+Analyze results:
+
+```bash
+dw project run classify-analyze
+```
+
+Check overall usage:
+
+```bash
+dw usage --since $(date +%Y-%m-%d)
 ```
 
 ### Available Models

@@ -1,6 +1,14 @@
 # Data files (too large for git)
 */data/
+*/output/
+*/batches/
 */results/
+
+# dw project run state
+*/.dw-run.json
+*/.dw-run.json.tmp
+*/.dw-run.json.bak
+*/.batch-id
 
 # Dataset compilation intermediate/output files
 dataset-compilation/.companies_*

@@ -4,7 +4,7 @@ Generating high-quality synthetic training data has traditionally required eithe
 
 We generated 10,000 synthetic question-answer pairs for fine-tuning a customer support model, with controlled difficulty levels and topic coverage, for \$3.21 on Doubleword's batch API versus \$109 on GPT-4o realtime. At that price and speed, you can iterate on your data generation prompts the way you'd iterate on hyperparameters.
 
-To run this yourself, sign up at [app.doubleword.ai](https://app.doubleword.ai) and generate an API key.
+To run this yourself, install the [dw CLI](https://github.com/doublewordai/dw) and `dw login`, or sign up at [app.doubleword.ai](https://app.doubleword.ai).
 
 ## Why This Matters
 
@@ -139,55 +139,67 @@ Quality filtering runs as a third batch pass, scoring each conversation on three
 
 ## Running It Yourself
 
-Set up your environment:
+### Using the Doubleword CLI
+
+Install the [dw CLI](https://github.com/doublewordai/dw) and log in:
 
 ```bash
-cd synthetic-data-generation && uv sync
-export DOUBLEWORD_API_KEY="your-key"
+dw login
 ```
 
-Generate a full synthetic dataset (10,000 samples):
+Clone, setup, and see the full workflow:
 
 ```bash
-uv run synthetic-data run -m 30b -n 10000
+dw examples clone synthetic-data-generation
+cd synthetic-data-generation
+dw project setup
+dw project info
+```
+
+The fastest way to run everything end-to-end:
+
+```bash
+dw project run-all
+```
+
+Or run each step manually for more control:
+
+Run the three-stage pipeline (scenarios -> conversations -> quality scoring):
+
+```bash
+dw project run generate -- -m Qwen/Qwen3-VL-30B-A3B-Instruct-FP8 -n 1000
 ```
 
 For a quick test, generate 100 samples:
 
 ```bash
-uv run synthetic-data run -m 30b -n 100
+dw project run generate -- -m Qwen/Qwen3-VL-30B-A3B-Instruct-FP8 -n 100
 ```
 
 Customize the domain and product to match your use case:
 
 ```bash
-uv run synthetic-data run -m 30b -n 1000 \
+dw project run generate -- -m Qwen/Qwen3-VL-30B-A3B-Instruct-FP8 -n 1000 \
     --domain "technical support" \
     --product "cloud infrastructure platform"
 ```
 
-Or provide your own topic seeds via CSV or JSONL (must have a `topic` column):
+Analyze quality scores:
 
 ```bash
-uv run synthetic-data run -m 30b -n 1000 --seed-file my-topics.csv
-```
-
-Check status of a running batch:
-
-```bash
-uv run synthetic-data status --batch-id <batch-id>
-```
-
-Once complete, analyze quality scores:
-
-```bash
-uv run synthetic-data analyze
+dw project run analyze
 ```
 
 Export the filtered dataset in training-ready format (JSONL with messages arrays):
 
 ```bash
-uv run synthetic-data export --min-score 3.5
+dw project run export
+```
+
+Check overall usage:
+
+```bash
+dw usage --since $(date +%Y-%m-%d)
 ```
 
 The `results/` directory contains scenarios, raw conversations, quality scores, and the final filtered dataset.

@@ -2,9 +2,16 @@
 
 Production-ready examples demonstrating what becomes possible when LLM inference is cheap enough to use at scale. Each example includes working code, real-world data, and measured costs.
 
-To get started, sign up at [app.doubleword.ai](https://app.doubleword.ai) and generate an API key.
+To get started, install the [dw CLI](https://github.com/doublewordai/dw) and log in:
 
-## CLI Examples
+```bash
+curl -fsSL https://raw.githubusercontent.com/doublewordai/dw/main/install.sh | sh
+dw login
+```
+
+Or sign up at [app.doubleword.ai](https://app.doubleword.ai) if you don't have an account yet.
+
+## Examples
 
 | Example | What It Does | Cost | Key Insight |
 |---------|--------------|------|-------------|
@@ -44,39 +51,57 @@ Pricing sources: [Doubleword](https://doubleword.ai/pricing), [OpenAI](https://o
 
 ## Running the Examples
 
-Each example follows the same structure:
+Each example is a **dw project** — a self-contained workflow defined in a `dw.toml` manifest. Clone any example and run it with the [dw CLI](https://github.com/doublewordai/dw):
 
 ```bash
-cd <example-name>
-uv sync
-export DOUBLEWORD_API_KEY="your-key"
-uv run <example-name> run --help
+dw examples clone model-evals
+cd model-evals
+dw project setup
+dw project info
 ```
 
-Common CLI patterns across all examples:
+Run everything end-to-end:
 
-| Flag | Meaning |
-|------|---------|
-| `-m`, `--model` | Model alias (`30b`, `235b`) or full name |
-| `-n`, `--limit` | Number of items to process |
-| `-o`, `--output` | Output directory (default: `results/`) |
-| `--dry-run` | Prepare batch file without submitting |
-| `status` | Check batch progress |
-| `analyze` | Generate accuracy/cost analysis |
+```bash
+dw project run-all
+```
+
+Or run steps individually for more control — see `dw project info` for the full workflow, and each example's README for step-by-step instructions.
+
+### How dw Projects Work
+
+Each example has a `dw.toml` that defines:
+- **Setup** — dependency installation (e.g., `uv sync`)
+- **Custom project steps** — Python commands for data preparation and analysis
+- **Workflow** — the full end-to-end sequence mixing `dw` CLI commands with project steps
+
+The `dw` CLI handles batch file management, submission, progress watching, and result retrieval. Your project steps handle domain-specific logic: loading datasets, building prompts, and analyzing results.
+
+```bash
+dw project run prepare          # Your code: generate batch JSONL
+dw files prepare batch.jsonl --model Qwen/Qwen3-VL-30B-A3B-Instruct-FP8
+dw stream batch.jsonl > results.jsonl  # CLI: upload, batch, stream results
+dw project run analyze -- -r results.jsonl  # Your code: score/analyze
+dw batches analytics <batch-id>  # CLI: cost and token breakdown
+```
 
 ## Models
 
-All examples support these models with consistent aliases:
+Examples use models available on the Doubleword platform:
 
-| Alias | Model | Use Case |
-|-------|-------|----------|
-| `30b` | Qwen3-VL-30B-A3B-Instruct-FP8 | Best value for most tasks |
-| `235b` | Qwen3-VL-235B-A22B-Instruct-FP8 | Maximum accuracy |
-| `gpt5-nano` | gpt-5-nano | OpenAI budget tier |
-| `gpt5-mini` | gpt-5-mini | OpenAI mid-tier |
-| `gpt5.2` | gpt-5.2 | OpenAI flagship |
+| Model | Best For | Batch Pricing (per 1M tokens) |
+|-------|----------|-------------------------------|
+| Qwen3-VL-30B-A3B-Instruct-FP8 | Best value for most tasks | Input \$0.05, Output \$0.20 |
+| Qwen3-VL-235B-A22B-Instruct-FP8 | Maximum accuracy | Input \$0.10, Output \$0.40 |
+| Qwen3-Embedding-8B | Embeddings | Input \$0.01 |
 
-The Qwen models are available through Doubleword's batch API; OpenAI models use their API directly.
+Set the model when preparing batch files:
+
+```bash
+dw files prepare batch.jsonl --model Qwen/Qwen3-VL-30B-A3B-Instruct-FP8
+```
+
+See the full model list and current pricing at [doubleword.ai/pricing](https://doubleword.ai/pricing) or run `dw models list`.
 
 ## Project Structure
 
@@ -84,19 +109,19 @@ Each example follows this layout:
 
 ```
 example-name/
+├── dw.toml            # Project manifest (steps, workflow)
 ├── README.md          # Results, methodology, replication instructions
-├── pyproject.toml     # Dependencies and CLI entry point
+├── pyproject.toml     # Python dependencies and CLI entry point
 ├── src/
-│   ├── cli.py         # Click CLI with run/status/analyze commands
-│   ├── batch.py       # Batch API utilities
+│   ├── cli.py         # Click CLI with prepare/analyze commands
 │   └── ...            # Task-specific modules
-├── data/              # Sample data or scripts to fetch it
 └── results/           # Output artifacts (gitignored)
 ```
 
 ## Requirements
 
+- [dw CLI](https://github.com/doublewordai/dw) — install with `curl -fsSL https://raw.githubusercontent.com/doublewordai/dw/main/install.sh | sh`
 - Python 3.11+
-- [uv](https://github.com/astral-sh/uv) for dependency management
-- Doubleword API key from [app.doubleword.ai](https://app.doubleword.ai)
-- Some examples require additional API keys (Serper for web search, OpenAI for comparison runs)
+- [uv](https://github.com/astral-sh/uv) for dependency management (installed automatically by `dw project setup` if not present)
+- Doubleword account — sign up at [app.doubleword.ai](https://app.doubleword.ai)
+- Some examples require additional API keys (Serper for web search)

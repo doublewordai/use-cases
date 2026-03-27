@@ -4,7 +4,7 @@
 
 Structured extraction from documents is a common production workload: pull vendor names, dates, and totals from receipts; extract fields from invoices; parse information from scanned forms. Vision-language models handle this well, but the choice of model matters more than you'd expect. We ran five models against 626 scanned receipts and found that Qwen3-VL-30B, a relatively small open-weights model, outperforms OpenAI's flagship GPT-5.2 while costing 12x less per document. For applications that need maximum accuracy, Qwen3-VL-235B reaches 93% at under a tenth of a cent per receipt.
 
-To run this yourself, sign up at [app.doubleword.ai](https://app.doubleword.ai) and generate an API key.
+To run this yourself, install the [dw CLI](https://github.com/doublewordai/dw) and `dw login`, or sign up at [app.doubleword.ai](https://app.doubleword.ai).
 
 ## Results
 
@@ -65,11 +65,30 @@ Vendor name errors dominate across all models. The Qwen models make roughly half
 
 ## Replication
 
-### Setup
+### Using the Doubleword CLI
+
+Install the [dw CLI](https://github.com/doublewordai/dw) and log in:
 
 ```bash
-cd structured-extraction && uv sync
+dw login
 ```
+
+Clone, setup, and see the full workflow:
+
+```bash
+dw examples clone structured-extraction
+cd structured-extraction
+dw project setup
+dw project info
+```
+
+The fastest way to run everything end-to-end:
+
+```bash
+dw project run-all
+```
+
+Or run each step manually for more control:
 
 Download the SROIE dataset:
 
@@ -79,27 +98,30 @@ uv run python -m src.sroie
 
 This creates `data/sroie/receipts.jsonl` with 626 receipt images and ground truth labels.
 
-### Running extraction with Doubleword Batch API
-
-Set your API key and submit a batch:
+Generate the extraction batch JSONL (dry run — creates files but doesn't submit):
 
 ```bash
-export DOUBLEWORD_API_KEY="your-key"
-uv run python -m src.cli run -i data/sroie/receipts.jsonl -m 30b -n 1
+dw project run prepare -- -i data/sroie/receipts.jsonl -m Qwen/Qwen3-VL-30B-A3B-Instruct-FP8 -n 1
 ```
 
-The `-m 30b` flag selects Qwen3-VL-30B. Use `-m 235b` for maximum accuracy, or `-m 30b,235b` to run both.
+The `-m Qwen/Qwen3-VL-30B-A3B-Instruct-FP8` flag selects Qwen3-VL-30B. Use `-m 235b` for maximum accuracy, or `-m Qwen/Qwen3-VL-30B-A3B-Instruct-FP8,235b` to run both.
 
-Check status and download results:
+Submit the batch and stream results:
 
 ```bash
-uv run python -m src.cli status
+dw stream results/batch_30b_n1.jsonl > results/results_30b_n1.jsonl
 ```
 
 Analyze accuracy against ground truth:
 
 ```bash
-uv run python -m src.cli analyze -i data/sroie/receipts.jsonl
+dw project run analyze -- -i data/sroie/receipts.jsonl -r results/
+```
+
+Check what it cost (the batch ID is printed by `dw stream`):
+
+```bash
+dw batches analytics <batch-id>
 ```
 
 ### Comparing with OpenAI
@@ -108,8 +130,8 @@ For comparison, you can run GPT models via their real-time API:
 
 ```bash
 export OPENAI_API_KEY="your-key"
-uv run python -m src.cli realtime -i data/sroie/receipts.jsonl -m gpt-5-mini
-uv run python -m src.cli analyze -i data/sroie/receipts.jsonl -r results/
+uv run structured-extraction realtime -i data/sroie/receipts.jsonl -m gpt-5-mini
+uv run structured-extraction analyze -i data/sroie/receipts.jsonl -r results/
 ```
 
 Note: OpenAI's real-time API costs 2x their batch API rates. The costs in our comparison use batch pricing for all models.

@@ -4,7 +4,7 @@ Agentic workflows require many rounds of inference. A single research agent migh
 
 Doubleword is the only platform that offers a 1-hour SLA for batch inference. This changes what's possible: a recursive research system that spawns dozens of sub-agents, each making multiple tool calls, can complete in a day rather than a month, while still costing 95% less than real-time inference.
 
-To run this yourself, sign up at [app.doubleword.ai](https://app.doubleword.ai) and generate an API key.
+To run this yourself, install the [dw CLI](https://github.com/doublewordai/dw) and `dw login`, or sign up at [app.doubleword.ai](https://app.doubleword.ai).
 
 ## Why This Matters
 
@@ -120,35 +120,60 @@ pending → in_progress → waiting_for_children → in_progress → completed
 
 ## Running It
 
+### Using the Doubleword CLI
+
+Install the [dw CLI](https://github.com/doublewordai/dw) and log in:
+
 ```bash
-cd async-agents && uv sync
-export DOUBLEWORD_API_KEY="your-key"
-export SERPER_API_KEY="your-serper-key"  # Free at https://serper.dev
+dw login
+```
+
+Clone, setup, and see the full workflow:
+
+```bash
+dw examples clone async-agents
+cd async-agents
+dw project setup
+dw project info
+```
+
+The fastest way to run everything end-to-end:
+
+```bash
+dw project run-all
+```
+
+Or run each step manually for more control:
+
+You'll also need a [Serper](https://serper.dev) API key for web search:
+
+```bash
+export SERPER_API_KEY="your-key"
 ```
 
 Run a research investigation:
 
 ```bash
 # Let the root agent decide how to research the topic
-uv run async-agents run --topic "quantum computing error correction" -m 235b
+dw project run research -- --topic "quantum computing error correction" -m Qwen/Qwen3-VL-235B-A22B-Instruct-FP8
 
 # Limit batch rounds for a quicker run
-uv run async-agents run --topic "rust vs go for web services" -m 30b --max-iterations 10
+dw project run research -- --topic "rust vs go for web services" -m Qwen/Qwen3-VL-30B-A3B-Instruct-FP8 --max-iterations 10
 
 # Dry run to inspect the root agent's batch file and tool definitions
-uv run async-agents run --topic "nuclear fusion progress" --dry-run
-```
-
-Check status of a running batch:
-
-```bash
-uv run async-agents status --batch-id <batch-id>
+dw project run research -- --topic "nuclear fusion progress" --dry-run
 ```
 
 View completed reports:
 
 ```bash
-uv run async-agents report
+dw project run report
+```
+
+Check overall usage:
+
+```bash
+dw usage --since $(date +%Y-%m-%d)
 ```
 
 ## Cost Comparison

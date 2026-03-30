@@ -248,26 +248,20 @@ def search_cmd(query: str, results_dir: str, top_k: int):
 
 
 def main():
+    # Click's standalone_mode=True handles all error formatting, usage output,
+    # and exit codes. It raises SystemExit when done. We intercept SystemExit
+    # only to swap sys.exit for os._exit when the HuggingFace datasets library
+    # was imported, since its background threads block normal shutdown.
     try:
-        cli(standalone_mode=False)
+        cli()
     except SystemExit as e:
-        # Click raises SystemExit on --help, errors, etc.
         code = e.code if isinstance(e.code, int) else (1 if e.code else 0)
         if "datasets" in sys.modules:
+            sys.stdout.flush()
+            sys.stderr.flush()
             import os
             os._exit(code)
-        sys.exit(code)
-    except Exception as e:
-        print(f"Error: {e}", file=sys.stderr)
-        if "datasets" in sys.modules:
-            import os
-            os._exit(1)
-        sys.exit(1)
-
-    # Normal completion — force exit if HF datasets was imported
-    if "datasets" in sys.modules:
-        import os
-        os._exit(0)
+        raise
 
 
 if __name__ == "__main__":

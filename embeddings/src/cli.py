@@ -248,15 +248,23 @@ def search_cmd(query: str, results_dir: str, top_k: int):
 
 
 def main():
-    # Run the CLI normally. If the HuggingFace `datasets` library was
-    # imported (by the prepare command), it spawns background threads that
-    # block shutdown. In that case, force-exit after cli() returns
-    # successfully. On errors, let the exception propagate normally so
-    # the exit code is preserved.
-    cli()
-    if "datasets" in sys.modules:
-        import os
-        os._exit(0)
+    # Click's standalone_mode=True handles all error formatting, usage output,
+    # and exit codes. It raises SystemExit when done. We intercept SystemExit
+    # only to swap sys.exit for os._exit when the HuggingFace datasets library
+    # was imported, since its background threads block normal shutdown.
+    try:
+        cli()
+    except SystemExit as e:
+        code = e.code if isinstance(e.code, int) else (1 if e.code else 0)
+        if "datasets" in sys.modules:
+            try:
+                sys.stdout.flush()
+                sys.stderr.flush()
+            except BrokenPipeError:
+                pass
+            import os
+            os._exit(code)
+        raise
 
 
 if __name__ == "__main__":

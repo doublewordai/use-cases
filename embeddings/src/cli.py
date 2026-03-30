@@ -257,8 +257,11 @@ def main():
     except SystemExit as e:
         code = e.code if isinstance(e.code, int) else (1 if e.code else 0)
         if "datasets" in sys.modules:
-            sys.stdout.flush()
-            sys.stderr.flush()
+            try:
+                sys.stdout.flush()
+                sys.stderr.flush()
+            except BrokenPipeError:
+                pass
             import os
             os._exit(code)
         raise

@@ -19,17 +19,15 @@ from PIL import Image
 # Unsplash originals can exceed Pillow's default pixel limit
 Image.MAX_IMAGE_PIXELS = None
 
-TARGET_WIDTH = 1280
-TARGET_HEIGHT = 720
-IMAGES_PER_REQUEST = 4
+TARGET_WIDTH = 512
+TARGET_HEIGHT = 512
+IMAGES_PER_REQUEST = 1
 NUM_BATCH_FILES = 10
 
 PROMPT = (
-    "You are given {num_images} images. For each image, write a concise social "
-    "media-style summary. Number your summaries 1 through {num_images} to match "
-    "the order the images appear.\n\n"
-    "Image metadata (in order):\n{metadata}\n\n"
-    "Write a concise summary for each image, ignoring any irrelevant metadata."
+    "Write a concise social media-style summary for this image.\n\n"
+    "Image metadata:\n{metadata}\n\n"
+    "Write a single summary, ignoring any irrelevant metadata."
 )
 
 
@@ -78,7 +76,7 @@ async def fetch_images(urls: list[str], cache_dir: Path) -> list[str | None]:
 
         img = img.crop(box).resize((TARGET_WIDTH, TARGET_HEIGHT), Image.LANCZOS)
         buf = io.BytesIO()
-        img.save(buf, format="JPEG", quality=95)
+        img.save(buf, format="JPEG", quality=75)
         return base64.b64encode(buf.getvalue()).decode("utf-8")
 
     ssl_context = ssl.create_default_context(cafile=certifi.where())
@@ -170,12 +168,10 @@ def prepare(input_path: str, output_dir: str, num_images: int):
         group = valid_images[group_start : group_start + IMAGES_PER_REQUEST]
         group_idx = group_start // IMAGES_PER_REQUEST
 
-        metadata_lines = []
-        for i, (orig_idx, _, desc, photog) in enumerate(group, 1):
-            metadata_lines.append(f"{i}. Caption: {desc} | Photographer: {photog}")
-        metadata = "\n".join(metadata_lines)
+        _, _, desc, photog = group[0]
+        metadata = f"Caption: {desc} | Photographer: {photog}"
 
-        prompt = PROMPT.format(num_images=len(group), metadata=metadata)
+        prompt = PROMPT.format(metadata=metadata)
 
         content = [{"type": "text", "text": prompt}]
         for _, b64, _, _ in group:
@@ -199,9 +195,7 @@ def prepare(input_path: str, output_dir: str, num_images: int):
             }
         )
 
-    click.echo(
-        f"Built {len(requests_data)} requests ({IMAGES_PER_REQUEST} images each)"
-    )
+    click.echo(f"Built {len(requests_data)} requests (1 image each)")
 
     # Split across multiple batch files (vision requests can be large)
     requests_per_file = math.ceil(len(requests_data) / NUM_BATCH_FILES)

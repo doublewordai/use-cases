@@ -10,13 +10,13 @@ Note: This can be done for ~\$0.05 using the smaller Qwen3-VL-30B model.
 
 ## What we did
 
-We took 1,000 photographs from the [Unsplash Lite dataset](https://github.com/unsplash/datasets), a freely available collection of high-quality stock photos with metadata (descriptions, photographer names). Each image was resized to 720p, sent to a vision-language model along with its existing caption and photographer credit, and the model was asked to produce a concise social media-style summary.
+We took 1,000 photographs from the [Unsplash Lite dataset](https://github.com/unsplash/datasets), a freely available collection of high-quality stock photos with metadata (descriptions, photographer names). Each image was resized to 512x512, sent to a vision-language model along with its existing caption and photographer credit, and the model was asked to produce a concise social media-style summary.
 
 The prompt is straightforward: given the image, the existing caption, and the photographer username, write a summary suitable for a social media post. The model sees the actual image pixels, not just the metadata, so the summaries reflect visual content that the original captions may not mention.
 
 ## Data
 
-The [Unsplash Lite dataset](https://github.com/unsplash/datasets) contains 25,000 photographs contributed by Unsplash photographers. We used the first 1,000 images from `photos.csv000`. Each record includes a photo URL, a text description, and the photographer's username. Images are fetched from Unsplash's CDN and resized to 1280x720 before encoding as base64 for the vision model.
+The [Unsplash Lite dataset](https://github.com/unsplash/datasets) contains 25,000 photographs contributed by Unsplash photographers. We used the first 1,000 images from `photos.csv000`. Each record includes a photo URL, a text description, and the photographer's username. Images are fetched from Unsplash's CDN and resized to 512x512 before encoding as base64 for the vision model.
 
 ## Baseline
 

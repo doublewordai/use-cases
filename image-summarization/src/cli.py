@@ -19,9 +19,9 @@ from PIL import Image
 # Unsplash originals can exceed Pillow's default pixel limit
 Image.MAX_IMAGE_PIXELS = None
 
-TARGET_WIDTH = 1920
-TARGET_HEIGHT = 1080
-IMAGES_PER_REQUEST = 20
+TARGET_WIDTH = 1280
+TARGET_HEIGHT = 720
+IMAGES_PER_REQUEST = 4
 NUM_BATCH_FILES = 10
 
 PROMPT = (

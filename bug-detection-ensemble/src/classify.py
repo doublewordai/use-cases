@@ -104,7 +104,9 @@ def load_classification_samples(
 
     samples = []
 
-    for cwe in CWE_LIST:
+    import sys
+    for cwe_idx, cwe in enumerate(CWE_LIST, 1):
+        print(f"  Loading {cwe} ({cwe_idx}/{len(CWE_LIST)})...", end="", flush=True, file=sys.stderr)
         query = """
         SELECT DISTINCT
             m.method_change_id,
@@ -133,6 +135,7 @@ def load_classification_samples(
 
         cursor = conn.execute(query, params)
 
+        count_before = len(samples)
         for row in cursor:
             code = preprocess_code(row['code'], strip_comments=True)
 
@@ -143,6 +146,7 @@ def load_classification_samples(
                 "cve_id": row['cve_id'],
                 "method_name": row['method_name'],
             })
+        print(f" {len(samples) - count_before} samples", file=sys.stderr)
 
     conn.close()
     return samples

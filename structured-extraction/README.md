@@ -93,7 +93,7 @@ Or run each step manually for more control:
 Download the SROIE dataset:
 
 ```bash
-uv run python -m src.sroie
+dw project run fetch-data
 ```
 
 This creates `data/sroie/receipts.jsonl` with 626 receipt images and ground truth labels.

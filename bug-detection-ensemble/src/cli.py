@@ -548,10 +548,10 @@ def ensemble_prepare(output: str, model: str, samples_file: str, prompt_subset: 
 # ============================================================================
 
 @cli.command()
-@click.option("--max-per-cwe", "-n", default=None, type=int,
-              help="Maximum samples per CWE class (default: all)")
+@click.option("--max-per-cwe", "-n", default=200, type=int,
+              help="Maximum samples per CWE class (default: 200, use 0 for all)")
 @click.option("--output", "-o", default="batches", help="Output directory for batch JSONL")
-def classify(max_per_cwe: int | None, output: str):
+def classify(max_per_cwe: int, output: str):
     """Load dataset and generate CWE classification batch JSONL.
 
     The output file has no model set — use `dw files prepare --model <name>`
@@ -574,7 +574,7 @@ def classify(max_per_cwe: int | None, output: str):
             "Run: uv run bug-ensemble fetch-cvefixes to download"
         )
 
-    samples = load_classification_samples(db_path, max_per_cwe=max_per_cwe)
+    samples = load_classification_samples(db_path, max_per_cwe=max_per_cwe or None)
     click.echo(f"Loaded {len(samples)} samples across {len(CWE_CLASSES)} CWE classes")
 
     # Show distribution
@@ -646,7 +646,7 @@ def classify_realtime(max_per_cwe: int | None, model: str, output: str, concurre
     if not db_path.exists():
         raise click.ClickException(f"CVEfixes database not found: {db_path}")
 
-    samples = load_classification_samples(db_path, max_per_cwe=max_per_cwe)
+    samples = load_classification_samples(db_path, max_per_cwe=max_per_cwe or None)
     click.echo(f"Loaded {len(samples)} samples across {len(CWE_CLASSES)} CWE classes")
 
     # Get client

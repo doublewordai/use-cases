@@ -3,6 +3,7 @@ name = "structured-extraction"
 setup = "uv sync"
 workflow = [
     "dw project setup",
+    "dw project run fetch-data",
     "dw project run prepare -- -i data/sroie/receipts.jsonl -m Qwen/Qwen3-VL-30B-A3B-Instruct-FP8 -n 1 -o batches",
     "dw files stats batches/batch_30b_n1.jsonl",
     "dw batches run batches/batch_30b_n1.jsonl --watch --output-id .batch-id",
@@ -10,6 +11,10 @@ workflow = [
     "dw project run analyze -- -i data/sroie/receipts.jsonl -r results/",
     "dw batches analytics $(cat .batch-id)",
 ]
+
+[steps.fetch-data]
+description = "Download the SROIE receipt dataset"
+run = "uv run python -m src.sroie"
 
 [steps.prepare]
 description = "Load receipts and generate extraction batch JSONL (download SROIE first: uv run python -m src.sroie)"

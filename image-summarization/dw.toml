@@ -3,6 +3,7 @@ name = "image-summarization"
 setup = "uv sync"
 workflow = [
     "dw project setup",
+    "dw project run fetch-data",
     "dw project run prepare -- -i unsplash-research-dataset-lite-latest/photos.csv000 -n 1000",
     "dw files stats batches/batch_00.jsonl",
     "dw files prepare batches/ --model Qwen/Qwen3-VL-30B-A3B-Instruct-FP8",
@@ -10,6 +11,10 @@ workflow = [
     "dw batches results $(cat .batch-id) -o results/summaries.jsonl",
     "dw project run analyze -- -i unsplash-research-dataset-lite-latest/photos.csv000 -r results/summaries.jsonl",
 ]
+
+[steps.fetch-data]
+description = "Download and extract the Unsplash Lite dataset"
+run = "bash -c 'if [ ! -f unsplash-research-dataset-lite-latest/photos.csv000 ]; then echo \"Download the Unsplash Lite dataset from https://github.com/unsplash/datasets\" && echo \"Extract it so that unsplash-research-dataset-lite-latest/photos.csv000 exists in this directory.\" && exit 1; else echo \"Dataset found.\"; fi'"
 
 [steps.prepare]
 description = "Fetch images, encode to base64, and generate batch JSONL files"

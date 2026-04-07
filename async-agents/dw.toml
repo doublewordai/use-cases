@@ -3,7 +3,7 @@ name = "async-agents"
 setup = "uv sync"
 workflow = [
     "dw project setup",
-    "dw project run research -- --topic \"quantum computing error correction\" -m Qwen/Qwen3-VL-30B-A3B-Instruct-FP8",
+    "dw project run research -- --topic \"quantum computing error correction\" -m Qwen/Qwen3-VL-235B-A22B-Instruct-FP8",
     "dw project run report",
 ]
 

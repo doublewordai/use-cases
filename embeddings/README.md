@@ -149,7 +149,7 @@ dw batches run batches/batch.jsonl --watch --output-id .batch-id
 Download results and build the search index:
 
 ```bash
-dw batches results $(cat .batch-id) -o results/embeddings.jsonl
+dw batches results --from-file .batch-id -o results/embeddings.jsonl
 dw project run build-index -- -r results/embeddings.jsonl
 ```
 
@@ -162,7 +162,7 @@ dw project run search -- -q "how do black holes form"
 Check what it cost:
 
 ```bash
-dw batches analytics $(cat .batch-id)
+dw batches analytics --from-file .batch-id
 ```
 
 #### Sample first, then scale
@@ -173,7 +173,7 @@ For a quick test before embedding the full corpus:
 dw files sample batches/batch.jsonl -n 100 -o batches/sample.jsonl
 dw files prepare batches/sample.jsonl --model Qwen/Qwen3-Embedding-8B
 dw batches run batches/sample.jsonl --watch --output-id .batch-id
-dw batches results $(cat .batch-id) -o results/sample.jsonl
+dw batches results --from-file .batch-id -o results/sample.jsonl
 ```
 
 The `results/` directory contains the raw embeddings, the built HNSW index, and search metadata.

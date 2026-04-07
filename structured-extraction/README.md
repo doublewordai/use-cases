@@ -115,14 +115,14 @@ dw batches run batches/batch_30b_n1.jsonl --watch --output-id .batch-id
 Download results and analyze accuracy:
 
 ```bash
-dw batches results $(cat .batch-id) -o results/results.jsonl
+dw batches results --from-file .batch-id -o results/results.jsonl
 dw project run analyze -- -i data/sroie/receipts.jsonl -r results/
 ```
 
 Check what it cost:
 
 ```bash
-dw batches analytics $(cat .batch-id)
+dw batches analytics --from-file .batch-id
 ```
 
 ### Comparing with OpenAI

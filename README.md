@@ -81,9 +81,9 @@ The `dw` CLI handles batch file management, submission, progress watching, and r
 dw project run prepare          # Your code: generate batch JSONL
 dw files prepare batch.jsonl --model Qwen/Qwen3-VL-30B-A3B-Instruct-FP8
 dw batches run batch.jsonl --watch --output-id .batch-id  # CLI: upload, batch, watch
-dw batches results $(cat .batch-id) -o results/results.jsonl  # CLI: download results
+dw batches results --from-file .batch-id -o results/results.jsonl  # CLI: download results
 dw project run analyze -- -r results/results.jsonl  # Your code: score/analyze
-dw batches analytics $(cat .batch-id)  # CLI: cost and token breakdown
+dw batches analytics --from-file .batch-id  # CLI: cost and token breakdown
 ```
 
 ## Models

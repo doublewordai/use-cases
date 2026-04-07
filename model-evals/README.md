@@ -133,14 +133,14 @@ dw batches run batches/batch.jsonl --watch --output-id .batch-id
 Download results and score against ground truth:
 
 ```bash
-dw batches results $(cat .batch-id) -o results/results.jsonl
+dw batches results --from-file .batch-id -o results/results.jsonl
 dw project run analyze -- -r results/results.jsonl
 ```
 
 Check what it cost:
 
 ```bash
-dw batches analytics $(cat .batch-id)
+dw batches analytics --from-file .batch-id
 ```
 
 #### Model comparison
@@ -157,8 +157,8 @@ dw batches run batches/batch-30b.jsonl --watch --output-id .batch-id-30b
 dw batches run batches/batch-235b.jsonl --watch --output-id .batch-id-235b
 
 # Download results
-dw batches results $(cat .batch-id-30b) -o results/results-30b.jsonl
-dw batches results $(cat .batch-id-235b) -o results/results-235b.jsonl
+dw batches results --from-file .batch-id-30b -o results/results-30b.jsonl
+dw batches results --from-file .batch-id-235b -o results/results-235b.jsonl
 
 # Compare
 dw files diff results/results-30b.jsonl results/results-235b.jsonl

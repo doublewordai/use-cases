@@ -103,7 +103,7 @@ dw batches run batches/ --watch --output-id .batch-id
 Download results and parse into a CSV:
 
 ```bash
-dw batches results $(cat .batch-id) -o results/summaries.jsonl
+dw batches results --from-file .batch-id -o results/summaries.jsonl
 dw project run analyze -- -i unsplash-research-dataset-lite-latest/photos.csv000 -r results/summaries.jsonl
 ```
 
@@ -112,7 +112,7 @@ This produces `results/summaries.csv` with the image URL, original description, 
 Check what it cost:
 
 ```bash
-dw batches analytics $(cat .batch-id)
+dw batches analytics --from-file .batch-id
 ```
 
 #### Test with a small sample first
@@ -121,7 +121,7 @@ dw batches analytics $(cat .batch-id)
 dw files sample batches/batch_00.jsonl -n 5 -o batches/test.jsonl
 dw files prepare batches/test.jsonl --model Qwen/Qwen3-VL-30B-A3B-Instruct-FP8
 dw batches run batches/test.jsonl --watch --output-id .batch-id
-dw batches results $(cat .batch-id) -o results/test.jsonl
+dw batches results --from-file .batch-id -o results/test.jsonl
 ```
 
 ## Conclusion

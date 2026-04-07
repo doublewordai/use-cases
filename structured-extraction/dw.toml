@@ -8,9 +8,9 @@ workflow = [
     "dw files stats batches/batch_30b_n1.jsonl",
     "dw files split batches/batch_30b_n1.jsonl --chunk-size 100 -o batches/split",
     "dw batches run batches/split/ --watch --output-id .batch-id",
-    "dw batches results $(cat .batch-id) -o results/results.jsonl",
-    "dw project run analyze -- -i data/sroie/receipts.jsonl -r results/",
-    "dw batches analytics $(cat .batch-id)",
+    "dw batches results --from-file .batch-id -o results/results.jsonl",
+    "dw project run analyze -- -i data/sroie/receipts.jsonl -r results/results.jsonl",
+    "dw batches analytics --from-file .batch-id",
 ]
 
 [steps.fetch-data]

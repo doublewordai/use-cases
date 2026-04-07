@@ -8,9 +8,9 @@ workflow = [
     "dw files stats batches/classify.jsonl",
     "dw files prepare batches/classify.jsonl --model Qwen/Qwen3-VL-30B-A3B-Instruct-FP8",
     "dw batches run batches/classify.jsonl --watch --output-id .batch-id",
-    "dw batches results $(cat .batch-id) -o results/classify.jsonl",
+    "dw batches results --from-file .batch-id -o results/classify.jsonl",
     "dw project run analyze -- -r results/classify.jsonl",
-    "dw batches analytics $(cat .batch-id)",
+    "dw batches analytics --from-file .batch-id",
 ]
 
 [steps.fetch-data]

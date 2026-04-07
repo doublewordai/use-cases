@@ -133,14 +133,14 @@ dw batches run batches/classify.jsonl --watch --output-id .batch-id
 Download results and analyze:
 
 ```bash
-dw batches results $(cat .batch-id) -o results/classify.jsonl
+dw batches results --from-file .batch-id -o results/classify.jsonl
 dw project run analyze -- -r results/classify.jsonl
 ```
 
 Check what it cost:
 
 ```bash
-dw batches analytics $(cat .batch-id)
+dw batches analytics --from-file .batch-id
 ```
 
 #### Calibration: run twice
@@ -149,7 +149,7 @@ At \$0.40 per run, you can run the same classification twice and use agreement a
 
 ```bash
 dw batches run batches/classify.jsonl --watch --output-id .batch-id-run2
-dw batches results $(cat .batch-id-run2) -o results/classify-run2.jsonl
+dw batches results --from-file .batch-id-run2 -o results/classify-run2.jsonl
 ```
 
 When both runs agree on a classification, accuracy jumps to 66%. When they disagree, flag for manual review. See the [Calibration](#calibration-run-twice) section above for details.

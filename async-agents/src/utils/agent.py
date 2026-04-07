@@ -17,10 +17,47 @@ from dataclasses import dataclass, field
 
 import click
 
+import re
+import uuid
+
 from ..prompts import ROOT_AGENT_SYSTEM, SUB_AGENT_SYSTEM
 from ..tools import execute_tool, get_tools_for_agent
 from ..tools.search import format_results_for_context, search
 from .batch import extract_message, get_finish_reason
+
+
+def _parse_xml_tool_calls(content: str) -> list[dict] | None:
+    """Parse <tool_call> XML tags from content as a fallback.
+
+    Some models (e.g. Qwen3-VL) output tool calls as XML in content rather
+    than using the structured tool_calls field. Returns a list of OpenAI-format
+    tool call dicts, or None if no XML tool calls found.
+    """
+    pattern = r"<tool_call>\s*(\{.*?\})\s*</tool_call>"
+    matches = re.findall(pattern, content, re.DOTALL)
+    if not matches:
+        return None
+    tool_calls = []
+    for match in matches:
+        try:
+            parsed = json.loads(match)
+            name = parsed.get("name", "")
+            arguments = parsed.get("arguments", {})
+            tool_calls.append(
+                {
+                    "id": f"call_{uuid.uuid4().hex[:24]}",
+                    "type": "function",
+                    "function": {
+                        "name": name,
+                        "arguments": json.dumps(arguments)
+                        if isinstance(arguments, dict)
+                        else str(arguments),
+                    },
+                }
+            )
+        except json.JSONDecodeError:
+            continue
+    return tool_calls if tool_calls else None
 
 
 @dataclass
@@ -457,7 +494,26 @@ def process_responses(registry: AgentRegistry, results: dict[str, dict]) -> None
         finish_reason = get_finish_reason(result)
         message = extract_message(result)
 
-        if finish_reason == "stop":
+        # Check for structured tool_calls or fallback XML <tool_call> in content
+        has_tool_calls = "tool_calls" in message and message["tool_calls"]
+        xml_tool_calls = None
+        if not has_tool_calls and message.get("content"):
+            xml_tool_calls = _parse_xml_tool_calls(message["content"])
+            if xml_tool_calls:
+                has_tool_calls = True
+
+        if has_tool_calls:
+            # Tool calls present — either structured or parsed from XML
+            assistant_msg = {"role": "assistant", "content": message.get("content")}
+            if xml_tool_calls:
+                assistant_msg["tool_calls"] = xml_tool_calls
+            elif "tool_calls" in message:
+                assistant_msg["tool_calls"] = message["tool_calls"]
+            agent.messages.append(assistant_msg)
+            agent.iteration += 1
+            # Status stays in_progress — tools need execution
+
+        elif finish_reason == "stop":
             agent.messages.append(
                 {
                     "role": "assistant",
@@ -467,19 +523,6 @@ def process_responses(registry: AgentRegistry, results: dict[str, dict]) -> None
             agent.findings = message.get("content", "")
             agent.status = "completed"
             agent.iteration += 1
-
-        elif finish_reason in ("tool_calls", "function_call") or (
-            "tool_calls" in message and message["tool_calls"]
-        ):
-            # Accept tool calls even if finish_reason is "length" — the model
-            # may have hit the token limit while generating tool arguments
-            # (e.g., a long write_report) but the tool call is still usable.
-            assistant_msg = {"role": "assistant", "content": message.get("content")}
-            if "tool_calls" in message:
-                assistant_msg["tool_calls"] = message["tool_calls"]
-            agent.messages.append(assistant_msg)
-            agent.iteration += 1
-            # Status stays in_progress — tools need execution
 
         else:
             agent.status = "failed"

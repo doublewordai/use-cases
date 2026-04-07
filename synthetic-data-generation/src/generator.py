@@ -87,7 +87,7 @@ def build_scenario_requests(
                         ],
                         "response_format": SCENARIO_SCHEMA,
                         "temperature": 0.8,
-                        "max_tokens": 512,
+                        "max_tokens": 1024,
                     }
                 )
                 idx += 1

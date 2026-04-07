@@ -42,6 +42,38 @@ def _extract_content(result: dict) -> str:
         return ""
 
 
+def _try_parse_json(content: str) -> dict | None:
+    """Try to parse JSON from content, handling markdown fences and preamble.
+
+    Some models wrap JSON in ```json ... ``` or add text before/after.
+    """
+    import re
+
+    content = content.strip()
+    # Direct parse
+    try:
+        return json.loads(content)
+    except json.JSONDecodeError:
+        pass
+    # Try extracting from markdown code fence
+    m = re.search(r"```(?:json)?\s*\n?(.*?)```", content, re.DOTALL)
+    if m:
+        try:
+            return json.loads(m.group(1).strip())
+        except json.JSONDecodeError:
+            pass
+    # Try finding the first { ... } or [ ... ] block
+    for start_char, end_char in [("{", "}"), ("[", "]")]:
+        start = content.find(start_char)
+        end = content.rfind(end_char)
+        if start != -1 and end > start:
+            try:
+                return json.loads(content[start : end + 1])
+            except json.JSONDecodeError:
+                pass
+    return None
+
+
 def _run_stage(
     client,
     provider: str,
@@ -181,15 +213,14 @@ def run(
     total_tokens["input_tokens"] += tokens["input_tokens"]
     total_tokens["output_tokens"] += tokens["output_tokens"]
 
-    # Structured outputs guarantee valid JSON
     scenarios = []
     for custom_id in sorted(scenario_results.keys()):
         content = _extract_content(scenario_results[custom_id])
         if content:
-            try:
-                scenario = json.loads(content)
-                scenarios.append(scenario)
-            except json.JSONDecodeError:
+            parsed = _try_parse_json(content)
+            if parsed is not None:
+                scenarios.append(parsed)
+            else:
                 click.echo(f"  Warning: failed to parse {custom_id}")
 
     with open(output_dir / "scenarios.json", "w") as f:
@@ -213,10 +244,10 @@ def run(
     for custom_id in sorted(conv_results.keys()):
         content = _extract_content(conv_results[custom_id])
         if content:
-            try:
-                conversation = json.loads(content)
-                conversations.append(conversation)
-            except json.JSONDecodeError:
+            parsed = _try_parse_json(content)
+            if parsed is not None:
+                conversations.append(parsed)
+            else:
                 click.echo(f"  Warning: failed to parse {custom_id}")
 
     with open(output_dir / "conversations.json", "w") as f:
@@ -240,10 +271,10 @@ def run(
     for custom_id in sorted(quality_results.keys()):
         content = _extract_content(quality_results[custom_id])
         if content:
-            try:
-                score = json.loads(content)
-                scores.append(score)
-            except json.JSONDecodeError:
+            parsed = _try_parse_json(content)
+            if parsed is not None:
+                scores.append(parsed)
+            else:
                 click.echo(f"  Warning: failed to parse {custom_id}")
 
     with open(output_dir / "scores.json", "w") as f:

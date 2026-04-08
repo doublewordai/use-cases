@@ -58,6 +58,34 @@ from .batch import (
 )
 from .search import search
 
+import re
+
+
+def _try_parse_json(content: str) -> dict | None:
+    """Try to parse JSON from content, handling markdown fences and preamble."""
+    content = content.strip()
+    try:
+        return json.loads(content)
+    except json.JSONDecodeError:
+        pass
+    # Try extracting from markdown code fence
+    m = re.search(r"```(?:json)?\s*\n?(.*?)```", content, re.DOTALL)
+    if m:
+        try:
+            return json.loads(m.group(1).strip())
+        except json.JSONDecodeError:
+            pass
+    # Try finding the first { ... } block
+    start = content.find("{")
+    end = content.rfind("}")
+    if start != -1 and end > start:
+        try:
+            return json.loads(content[start : end + 1])
+        except json.JSONDecodeError:
+            pass
+    return None
+
+
 MODELS = {
     "30b": "Qwen/Qwen3-VL-30B-A3B-Instruct-FP8",
     "235b": "Qwen/Qwen3-VL-235B-A22B-Instruct-FP8",
@@ -392,6 +420,7 @@ Return JSON:
                 "model": model,
                 "messages": [{"role": "user", "content": prompt}],
                 "temperature": 0.3,
+                "max_tokens": 2048,
                 "response_format": {"type": "json_object"},
             },
         })
@@ -438,14 +467,16 @@ Return JSON:
         content = get_response_content(result)
         if not content:
             continue
-        try:
-            data = json.loads(content)
-            task = task_map.get(custom_id, {})
-            for company in data.get("companies", []):
+        data = _try_parse_json(content)
+        if data is None:
+            continue
+        task = task_map.get(custom_id, {})
+        # Handle both {"companies": [...]} and bare [...]
+        items = data.get("companies", []) if isinstance(data, dict) else data if isinstance(data, list) else []
+        for company in items:
+            if isinstance(company, dict):
                 company["_source_url"] = task.get("url", "")
                 companies.append(company)
-        except json.JSONDecodeError:
-            continue
 
     output_data = {"topic": topic, "companies": companies, "total": len(companies)}
     with open(output_path, "w") as f:
@@ -532,6 +563,7 @@ Only include clusters with 2+ names. Skip singletons."""
                 "model": model,
                 "messages": [{"role": "user", "content": prompt}],
                 "temperature": 0.1,
+                "max_tokens": 2048,
                 "response_format": {"type": "json_object"},
             },
         })
@@ -571,14 +603,14 @@ Only include clusters with 2+ names. Skip singletons."""
         content = get_response_content(result)
         if not content:
             continue
-        try:
-            result_data = json.loads(content)
-            for cluster in result_data.get("clusters", []):
-                canonical = cluster.get("canonical", "")
-                for variant in cluster.get("variants", []):
-                    name_to_canonical[variant] = canonical
-        except json.JSONDecodeError:
+        result_data = _try_parse_json(content)
+        if result_data is None:
             continue
+        clusters = result_data.get("clusters", []) if isinstance(result_data, dict) else result_data if isinstance(result_data, list) else []
+        for cluster in clusters:
+            canonical = cluster.get("canonical", "")
+            for variant in cluster.get("variants", []):
+                name_to_canonical[variant] = canonical
 
     click.echo(f"LLM identified {len(name_to_canonical)} variants to merge")
 
@@ -718,6 +750,7 @@ Return JSON:
                 "model": model,
                 "messages": [{"role": "user", "content": prompt}],
                 "temperature": 0.2,
+                "max_tokens": 1024,
                 "response_format": {"type": "json_object"},
             },
         })
@@ -767,16 +800,15 @@ Return JSON:
         if not content:
             continue
 
-        try:
-            classification = json.loads(content)
-            classification["_company"] = company
-
-            if classification.get("matches") and classification.get("confidence") != "low":
-                included.append(classification)
-            else:
-                excluded.append(classification)
-        except json.JSONDecodeError:
+        classification = _try_parse_json(content)
+        if classification is None:
             continue
+        classification["_company"] = company
+
+        if classification.get("matches") and classification.get("confidence") != "low":
+            included.append(classification)
+        else:
+            excluded.append(classification)
 
     # Build output
     filtered = []

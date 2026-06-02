@@ -3,7 +3,7 @@
 **Judge every output with a frontier model on batch inference, and track the
 scores in [Arize](https://arize.com) Phoenix. comprehensive evaluation at a fraction of realtime cost.**
 
-LLM-as-judge is a standard way to measure answer quality at scale but it's
+[LLM-as-judge](https://doubleword.ai/glossary#llm-as-a-judge) is a standard way to measure answer quality at scale but it's
 expensive, because you run a strong model over *every* output. The trick is that
 evaluation is a **background** workload: you're measuring, not serving, so you
 don't need realtime latency. That's exactly what batch inference is for.

@@ -1,0 +1,32 @@
+[project]
+name = "doubleword-arize"
+setup = "uv sync"
+workflow = [
+    "dw project setup",
+    # Stage 1 — generate answers (one batch). Phoenix Dataset is uploaded here too.
+    "dw project run prepare -- -n 817",
+    "dw files prepare batches/generate.jsonl --model deepseek-ai/DeepSeek-V4-Pro",
+    "dw batches run batches/generate.jsonl --watch --output-id .gen-id",
+    "dw batches results --from-file .gen-id -o results/answers.jsonl",
+    # Stage 2 — judge the answers (the heavy, expensive eval workload).
+    "dw project run prepare-judge -- -a results/answers.jsonl",
+    "dw files prepare batches/judge.jsonl --model deepseek-ai/DeepSeek-V4-Pro",
+    "dw batches run batches/judge.jsonl --watch --output-id .judge-id",
+    "dw batches results --from-file .judge-id -o results/scores.jsonl",
+    # Stage 3 — score, record the Phoenix Experiment, report token usage + cost.
+    "dw project run analyze -- -a results/answers.jsonl -s results/scores.jsonl",
+    "dw batches analytics --from-file .gen-id",
+    "dw batches analytics --from-file .judge-id",
+]
+
+[steps.prepare]
+description = "Download TruthfulQA, emit the generation batch, upload the Phoenix Dataset"
+run = "uv run doubleword-arize prepare"
+
+[steps.prepare-judge]
+description = "Turn generated answers into the judge batch"
+run = "uv run doubleword-arize prepare-judge"
+
+[steps.analyze]
+description = "Score judge results, log a Phoenix Experiment, report token usage"
+run = "uv run doubleword-arize analyze"

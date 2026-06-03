@@ -26,7 +26,11 @@ from .judge import Score
 def get_client():
     from phoenix.client import Client
 
-    return Client(base_url=settings.phoenix_collector_endpoint)
+    # api_key is None for local Phoenix and set for Arize Phoenix Cloud.
+    return Client(
+        base_url=settings.phoenix_collector_endpoint,
+        api_key=settings.phoenix_api_key,
+    )
 
 
 def _example_input(example: Any) -> dict[str, Any]:

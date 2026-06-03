@@ -103,11 +103,16 @@ Every other setting has a working default in [`src/config.py`](src/config.py).
 
 ```bash
 docker compose up -d
-# Phoenix UI at http://localhost:6006
+# Phoenix UI at http://localhost:6006 (set PHOENIX_PORT in .env to use another port)
 ```
 
 A local Phoenix is the only standing dependency — fair, since visualising the
 results in Arize is the point of the integration.
+
+**Prefer hosted?** Skip Docker and use [Arize Phoenix Cloud](https://app.phoenix.arize.com)
+instead: grab an API key from the dashboard ([docs](https://docs.arize.com/phoenix)) and,
+in `.env`, set `PHOENIX_COLLECTOR_ENDPOINT=https://app.phoenix.arize.com` and
+`PHOENIX_API_KEY=…`. Everything else is identical.
 
 ### 4. Run the pipeline with the `dw` CLI
 

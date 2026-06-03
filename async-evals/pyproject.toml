@@ -12,7 +12,12 @@ dependencies = [
     "tqdm>=4.66",
     "pydantic>=2.7",
     "pydantic-settings>=2.3",
-    "arize-phoenix>=16.0.0",
+    # Pinned >=16.4.0 to pull strawberry-graphql >=0.316.0 (GHSA: GraphiQL
+    # may expose HTTP headers in URLs, patched in 0.315.4). arize-phoenix
+    # 16.3.0 exact-pins strawberry-graphql==0.314.3, so the only path to
+    # the patched version is bumping arize-phoenix. Held <17 to avoid the
+    # major bump released same-day as the security alert.
+    "arize-phoenix>=16.4.0,<17",
     "pandas>=2.2",
     "python-dotenv>=1.0.1",
     "wasabi>=1.1.3",

@@ -1,0 +1,3 @@
+# Re-include the example env file. The repo-root .gitignore ignores `.env.*`,
+# which would otherwise swallow `.env.example`. Real `.env` files stay ignored.
+!.env.example

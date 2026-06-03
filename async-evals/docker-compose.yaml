@@ -1,0 +1,22 @@
+services:
+  phoenix:
+    image: arizephoenix/phoenix:latest
+    ports:
+      - "${PHOENIX_PORT:-6006}:6006"   # web UI + OTLP HTTP (host port from PHOENIX_PORT, default 6006)
+      - "4317:4317"                    # OTLP gRPC
+    environment:
+      PHOENIX_SQL_DATABASE_URL: postgresql://postgres:postgres@db:5432/postgres
+    depends_on:
+      - db
+
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    volumes:
+      - phoenix-pg:/var/lib/postgresql/data
+
+volumes:
+  phoenix-pg:

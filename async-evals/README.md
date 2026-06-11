@@ -1,9 +1,8 @@
 # Run 1,000,000 LLM-as-Judge Evaluations for $610
 
-**Judge every output with a frontier model on batch inference, and track the
-scores in [Arize AX](./arize-ax.md) for comprehensive evaluation at a fraction of realtime cost. Alternatively, run [Arize Phoenix](./arize-phoenix.md), the open-source alternative.**
+**Judge every output with a frontier model on batch inference,** and track the scores in [Arize AX](https://arize.com/) for comprehensive evaluation at a **fraction of realtime cost**. See the [Arize AX setup guide](./arize-ax.md) detailing integration with the **Doubleword Inference API**. Alternatively, the quickstart guide for integrating Doubleword [Arize Phoenix](./arize-phoenix.md), the open-source alternative.
 
-> We measured a full 817-question run at **$0.50** as a plug and play test to try the inference API and scaled it linearly to a million. See [Scaling beyond TruthfulQA](#scaling-beyond-truthfulqa) for the breakdown. See some of our customer use cases for examples of full workloads delivered at competitive costs [119,000 Medical Images Annotated for $452](https://doubleword.ai/customer-stories/openmed). 
+> We measured a full 817-question run at **$0.50** as a plug and play test to try the inference API. From this sample, we extrapolate the cost when scaled to a dataset of 1 million generations and evaluations. See [Scaling beyond TruthfulQA](#scaling-beyond-truthfulqa) for the breakdown. See some of our customer [use cases](https://doubleword.ai/use-cases/) for examples of full workloads delivered at competitive costs such as [119,000 Medical Images Annotated for $452](https://doubleword.ai/customer-stories/openmed). 
 
 [LLM-as-judge](https://doubleword.ai/glossary#llm-as-a-judge) is a standard way to measure answer quality at scale but it's
 expensive, because you run a strong model over *every* output. The trick is that

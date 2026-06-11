@@ -21,7 +21,7 @@ To run this yourself, install the [`dw` CLI](https://github.com/doublewordai/dw)
 and `dw login`, or sign up at [app.doubleword.ai](https://app.doubleword.ai/).
 
 <p align="center">
-  <img src="images/demo-hero.png" height="auto" width="auto" alt="Doubleword × Arize Phoenix" />
+  <img src="images/steps/09-arize-doubleword-eval-results-1.png" height="auto" width="auto" alt="Doubleword × Arize Phoenix" />
 </p>
 
 > One Doubleword API key covers realtime, async, and batch. The batch tier runs on

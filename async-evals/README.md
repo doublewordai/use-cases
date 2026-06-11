@@ -1,7 +1,9 @@
-# LLM-as-Judge Evaluations Observed in Arize Phoenix - 817 Answers and Judgements for $0.50
+# Run 1,000,000 LLM-as-Judge Evaluations for $610
 
 **Judge every output with a frontier model on batch inference, and track the
-scores in [Arize](https://arize.com) Phoenix. comprehensive evaluation at a fraction of realtime cost.**
+scores in [Arize AX](./arize-ax.md) for comprehensive evaluation at a fraction of realtime cost. Alternatively, run [Arize Phoenix](./arize-phoenix.md), the open-source alternative.**
+
+> We measured a full 817-question run at **$0.50** as a plug and play test to try the inference API and scaled it linearly to a million. See [Scaling beyond TruthfulQA](#scaling-beyond-truthfulqa) for the breakdown. See some of our customer use cases for examples of full workloads delivered at competitive costs [119,000 Medical Images Annotated for $452](https://doubleword.ai/customer-stories/openmed). 
 
 [LLM-as-judge](https://doubleword.ai/glossary#llm-as-a-judge) is a standard way to measure answer quality at scale but it's
 expensive, because you run a strong model over *every* output. The trick is that
@@ -99,20 +101,12 @@ uv sync --extra dev
 
 Every other setting has a working default in [`src/config.py`](src/config.py).
 
-### 3. Start Phoenix (local, Docker)
+### 3. Connect Arize
 
-```bash
-docker compose up -d
-# Phoenix UI at http://localhost:6006 (set PHOENIX_PORT in .env to use another port)
-```
+Pick where your traces and scores live, then follow that guide for the full walkthrough:
 
-A local Phoenix is the only standing dependency — fair, since visualising the
-results in Arize is the point of the integration.
-
-**Prefer hosted?** Skip Docker and use [Arize Phoenix Cloud](https://app.phoenix.arize.com)
-instead: grab an API key from the dashboard ([docs](https://docs.arize.com/phoenix)) and,
-in `.env`, set `PHOENIX_COLLECTOR_ENDPOINT=https://app.phoenix.arize.com` and
-`PHOENIX_API_KEY=…`. Everything else is identical.
+- **[Arize AX](./arize-ax.md)** — hosted SaaS. Add Doubleword as an evaluation provider, then grab your Space ID + API key.
+- **[Arize Phoenix](./arize-phoenix.md)** — open-source. Run it locally (`docker compose up -d`, UI at `localhost:6006`) or use Phoenix Cloud.
 
 ### 4. Run the pipeline with the `dw` CLI
 
@@ -152,7 +146,7 @@ Open [http://localhost:6006](http://localhost:6006) → **Datasets → truthfulq
 → Experiments** to browse per-example answers and scores.
 
 > **On the 24h window:** `BATCH_COMPLETION_WINDOW` is a *maximum* SLA, not an
-> expected wait. Batches routinely finish in minutes; the long ceiling just lets
+> expected wait. Batches routinely finish in minutes to a couple of hours. The long ceiling just lets
 > the shared queue guarantee a worst case across tenants. Use `1h` for a faster
 > smoke test.
 
@@ -176,7 +170,7 @@ scalable, cost-managed, rate-limit-proof eval pipeline.
 
 > _Generation is measured (817/817). Judge is extrapolated to the full 817 from the
 > measured per-request cost of the judge batch; mean scores are from the graded
-> sample. Batch cost comes from `dw batches analytics`._
+> sample. Batch cost comes from the doubleword cli: `dw batches analytics`._
 
 | Stage | Requests | Input tokens | Output tokens | Batch cost |
 |-------|---------:|-------------:|--------------:|-----------:|
@@ -191,13 +185,28 @@ See [doubleword.ai/pricing](https://doubleword.ai/pricing) for live rates.
 
 ---
 
+## Scaling beyond TruthfulQA
+
+The 817 questions in TruthfulQA offers a small test run to try batch evaluations for yourself with a relatively small sample for testing purposes. If we scaled the same dataset up to 100,000 or 1,000,000 items, as you might find in a production evaluation dataset, we can extrapolate what the estimated costs would be. Remember that every item is both **generated and judged** — two batch requests each — so the figures below cover the full pipeline, not just the judging. For 1,000,000 results, generating an answer and grading it for every item comes to roughly $610 on the batch tier, about half the realtime cost:
+
+| Items (generated + judged) | Batch requests | Generate | Judge | Batch total | Realtime total |
+|---------------------------:|---------------:|---------:|------:|------------:|---------------:|
+| 817 | 1,634 | $0.15 | $0.34 | $0.50 | ~$1.00 |
+| 100,000 | 200,000 | ~$19 | ~$42 | ~$61 | ~$122 |
+| 1,000,000 | 2,000,000 | ~$185 | ~$425 | ~$610 | ~$1,220 |
+
+
+These figures extrapolate the measured $0.50 / 817-result run and assume a token
+profile similar to TruthfulQA; longer prompts or answers scale the per-item cost
+proportionally. `dw batches analytics` reports the authoritative cost for any run.
+
+---
+
 ## Tests
 
 ```bash
 uv run pytest        # offline: JSONL shape, judge prompt, Score model, result parsing
 ```
-
-The suite is hermetic — no network, no Phoenix, no API key required.
 
 ## Project layout
 

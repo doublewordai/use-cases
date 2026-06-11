@@ -16,6 +16,7 @@ Or sign up at [app.doubleword.ai](https://app.doubleword.ai) if you don't have a
 | Example | What It Does | Cost | Key Insight |
 |---------|--------------|------|-------------|
 | [async-agents](./async-agents/) | Deep research with recursive agent trees | \$0.34 for 47 agents | 1-hour SLA enables multi-round agentic workflows |
+| [async-evals](./async-evals/) | Evaluate llm outputs and agentic workflows | 817-question run at **$0.50** \$0.50 for 817 generations and judges | Scale evals into the millions with low predictable costs |
 | [synthetic-data-generation](./synthetic-data-generation/) | Generate training data with quality filtering | \$3.21 for 10K samples | 3-stage pipeline in 3 hours, not 3 days |
 | [data-processing-pipelines](./data-processing-pipelines/) | Clean and enrich messy records | \$0.80 for 50K records | LLM-powered normalization at pipeline scale |
 | [embeddings](./embeddings/) | Semantic search over document corpus | \$0.03 for 1.6M tokens | 70% cheaper than OpenAI for same quality |

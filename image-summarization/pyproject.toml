@@ -10,7 +10,7 @@ dependencies = [
     "tqdm>=4.66.0",
     "pandas>=2.0.0",
     "pillow>=12.2.0",
-    "aiohttp>=3.14.0",
+    "aiohttp>=3.14.1",
     "certifi>=2023.0.0",
 ]
 

@@ -11,7 +11,7 @@ dependencies = [
     "click>=8.1",
     "tqdm>=4.66",
     "pydantic>=2.7",
-    "pydantic-settings>=2.3",
+    "pydantic-settings>=2.14.2",
     # Pinned >=16.4.0 to keep transitive strawberry-graphql at or above
     # the patched floor of 0.315.4 (GHSA: GraphiQL may expose HTTP
     # headers in URLs). arize-phoenix 16.3.0 exact-pins

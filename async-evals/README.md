@@ -144,9 +144,9 @@ dw batches analytics --from-file .judge-id
 Open [http://localhost:6006](http://localhost:6006) → **Datasets → truthfulqa-eval
 → Experiments** to browse per-example answers and scores.
 
-> **On the 24h window:** `BATCH_COMPLETION_WINDOW` is a *maximum* SLA, not an
-> expected wait. Batches routinely finish in minutes to a couple of hours. The long ceiling just lets
-> the shared queue guarantee a worst case across tenants. Use `1h` for a faster
+> **On the completion window:** `BATCH_COMPLETION_WINDOW` sets a *maximum* ceiling, not an
+> expected wait. Batches routinely finish much sooner; the long ceiling just lets
+> the shared queue absorb a worst case across tenants. Use `1h` for a faster
 > smoke test.
 
 ### 5. Or run it all in one script

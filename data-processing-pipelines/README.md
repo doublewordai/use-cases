@@ -1,6 +1,6 @@
 # Data Processing Pipelines: Cleaning 50,000 Records in 3 Hours for \$0.80
 
-Large-scale data cleaning and enrichment has always been tedious: write regex for every edge case, build lookup tables, or review hundreds of records manually. LLM-powered batch processing offers a third option: describe what you want in plain English and let the model handle the long tail of messy data. The constraint has been latency. A three-stage pipeline (normalize, enrich, deduplicate) with a 24-hour SLA per batch takes three days minimum. With Doubleword's 1-hour SLA, the same pipeline completes in 3 hours.
+Large-scale data cleaning and enrichment has always been tedious: write regex for every edge case, build lookup tables, or review hundreds of records manually. LLM-powered batch processing offers a third option: describe what you want in plain English and let the model handle the long tail of messy data. The constraint has been latency. A three-stage pipeline (normalize, enrich, deduplicate) on the 24-hour turnaround typical of batch APIs takes three days minimum. On Doubleword's faster batch tier, our run completed in about three hours.
 
 We cleaned and standardized 50,000 company records from a public dataset, fixing inconsistent names, normalizing addresses, and extracting structured fields, for \$0.80 on Doubleword's batch API versus \$27 on GPT-4o realtime.
 
@@ -12,14 +12,14 @@ Every data team has a pipeline that starts with "just clean up the data." The co
 
 LLMs are surprisingly good at this kind of fuzzy standardization. They understand that "MSFT", "Microsoft Corp", "Microsoft Corporation", and "microsoft inc" all refer to the same entity. But at realtime pricing, running 50,000 records through GPT-4o costs real money. And with multi-stage pipelines, latency compounds: three stages at 24 hours each means three days before you see results.
 
-Doubleword's 1-hour SLA solves both problems. A three-stage pipeline completes in 3 hours, and the cost drops by 97%. This makes it cheap enough to treat LLM-powered cleaning as a standard pipeline stage rather than an expensive special case.
+Doubleword's fast batch turnaround solves both problems. A three-stage pipeline completes in hours rather than days, and the cost drops by 97%. This makes it cheap enough to treat LLM-powered cleaning as a standard pipeline stage rather than an expensive special case.
 
 Here's what our 50,000-record run actually cost (3,932,240 input tokens, 1,756,710 output tokens):
 
 | Provider | Model | ELO | Input Rate | Output Rate | Total Cost |
 |----------|-------|-----|------------|-------------|------------|
-| Doubleword (1hr SLA) | Qwen 30B | 1382 | \$0.07/MTok | \$0.30/MTok | **\$0.80** |
-| Doubleword (1hr SLA) | Qwen 235B | 1423 | \$0.15/MTok | \$0.55/MTok | **\$1.56** |
+| Doubleword (batch) | Qwen 30B | 1382 | \$0.07/MTok | \$0.30/MTok | **\$0.80** |
+| Doubleword (batch) | Qwen 235B | 1423 | \$0.15/MTok | \$0.55/MTok | **\$1.56** |
 | OpenAI | GPT-4o | 1442 | \$2.50/MTok | \$10.00/MTok | **\$27.40** |
 | Anthropic | Claude Sonnet 4.5 | 1450 | \$3.00/MTok | \$15.00/MTok | **\$38.15** |
 
@@ -35,7 +35,7 @@ We used the [SEC EDGAR company tickers dataset](https://www.sec.gov/files/compan
 
 **Stage 3: Deduplicate** — Identify potential duplicate records by comparing normalized names and addresses, then use the LLM to make a final match/no-match decision on candidate pairs.
 
-With a 24-hour SLA, this pipeline takes 3 days minimum. With a 1-hour SLA, it completes in 3 hours.
+On a 24-hour batch turnaround, this pipeline takes 3 days minimum. On Doubleword's faster turnaround, our run completed in about three hours.
 
 ## Results
 
@@ -202,4 +202,4 @@ The deduplication stage depends heavily on the quality of candidate generation. 
 
 ## Conclusion
 
-LLM-powered data processing at batch pricing with a 1-hour SLA turns what used to be a multi-day manual effort into a pipeline you can run in an afternoon for under a dollar. At \$0.80 for 50,000 records through three processing stages, the cost is low enough that you can afford to run the pipeline iteratively: clean the data, inspect the results, adjust the prompts, and re-run. The quality won't match a dedicated data engineering team on high-value records, but for the broad middle ground of "good enough to be useful," batch LLM processing hits a compelling price-quality tradeoff that traditional approaches can't match.
+LLM-powered data processing at batch pricing with fast turnaround turns what used to be a multi-day manual effort into a pipeline you can run in an afternoon for under a dollar. At \$0.80 for 50,000 records through three processing stages, the cost is low enough that you can afford to run the pipeline iteratively: clean the data, inspect the results, adjust the prompts, and re-run. The quality won't match a dedicated data engineering team on high-value records, but for the broad middle ground of "good enough to be useful," batch LLM processing hits a compelling price-quality tradeoff that traditional approaches can't match.

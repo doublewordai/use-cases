@@ -1,6 +1,6 @@
 # Embeddings at Scale: Semantic Search for 70% Less Than OpenAI
 
-Vector embeddings power semantic search, RAG pipelines, and recommendation systems, but generating them at scale gets expensive. We embedded a document corpus using Doubleword's batch API for \$0.03, compared to \$0.21 on OpenAI's realtime API or \$0.10 on OpenAI's batch API. Since embedding is a single-batch operation with no sequential dependencies, the 24-hour SLA is fine here, and the cost savings are substantial.
+Vector embeddings power semantic search, RAG pipelines, and recommendation systems, but generating them at scale gets expensive. We embedded a document corpus using Doubleword's batch API for \$0.03, compared to \$0.21 on OpenAI's realtime API or \$0.10 on OpenAI's batch API. Since embedding is a single-batch operation with no sequential dependencies, batch turnaround time isn't a concern here, and the cost savings are substantial.
 
 To run this yourself, install the [dw CLI](https://github.com/doublewordai/dw) and `dw login`, or sign up at [app.doubleword.ai](https://app.doubleword.ai).
 
@@ -8,13 +8,13 @@ To run this yourself, install the [dw CLI](https://github.com/doublewordai/dw) a
 
 Every RAG system starts with embedding your documents. If you have 1,000 documents, any embedding API works fine. But at 100,000 documents, costs start to matter. At 1,000,000 documents, they dominate your pipeline budget. And if you're iterating on chunking strategies, re-embedding after each change, the costs multiply.
 
-Unlike multi-stage pipelines where Doubleword's 1-hour SLA is the key differentiator, embedding is embarrassingly parallel: every document is independent, so the entire corpus goes into a single batch. The 24-hour SLA works perfectly here, and the cost advantage is what matters.
+Unlike multi-stage pipelines where Doubleword's fast batch turnaround is the key differentiator, embedding is embarrassingly parallel: every document is independent, so the entire corpus goes into a single batch. Batch turnaround time isn't a constraint here, and the cost advantage is what matters.
 
 Here's what our embedding run actually cost (1,608,708 input tokens):
 
 | Provider | Model | Input Rate | Total Cost |
 |----------|-------|------------|------------|
-| Doubleword (24hr SLA) | Qwen3 Embedding 8B | \$0.02/MTok | **\$0.03** |
+| Doubleword (batch) | Qwen3 Embedding 8B | \$0.02/MTok | **\$0.03** |
 | OpenAI (batch) | text-embedding-3-large | \$0.065/MTok | **\$0.10** |
 | Voyage AI | voyage-3-large | \$0.12/MTok | **\$0.19** |
 | OpenAI (realtime) | text-embedding-3-large | \$0.13/MTok | **\$0.21** |
@@ -98,7 +98,7 @@ def search(index: hnswlib.Index, query_embedding: list[float], k: int = 10) -> l
     return list(zip(labels[0].tolist(), distances[0].tolist()))
 ```
 
-The key insight for batch embedding is that all documents are independent. The entire corpus can be embedded in a single batch with no sequential dependency, which makes the 24-hour SLA perfectly acceptable.
+The key insight for batch embedding is that all documents are independent. The entire corpus can be embedded in a single batch with no sequential dependency, which makes batch turnaround time a non-issue.
 
 ## Running It Yourself
 

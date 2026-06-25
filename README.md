@@ -15,7 +15,7 @@ Or sign up at [app.doubleword.ai](https://app.doubleword.ai) if you don't have a
 
 | Example | What It Does | Cost | Key Insight |
 |---------|--------------|------|-------------|
-| [async-agents](./async-agents/) | Deep research with recursive agent trees | \$0.34 for 47 agents | 1-hour SLA enables multi-round agentic workflows |
+| [async-agents](./async-agents/) | Deep research with recursive agent trees | \$0.34 for 47 agents | Fast batch turnaround enables multi-round agentic workflows |
 | [async-evals](./async-evals/) | Evaluate llm outputs and agentic workflows | \$0.50 for 817 generations and judges | Scale evals into the millions with low predictable costs |
 | [synthetic-data-generation](./synthetic-data-generation/) | Generate training data with quality filtering | \$3.21 for 10K samples | 3-stage pipeline in 3 hours, not 3 days |
 | [data-processing-pipelines](./data-processing-pipelines/) | Clean and enrich messy records | \$0.80 for 50K records | LLM-powered normalization at pipeline scale |
@@ -30,11 +30,11 @@ Or sign up at [app.doubleword.ai](https://app.doubleword.ai) if you don't have a
 
 Each example demonstrates a "more is different" capability: something that becomes qualitatively new when inference costs drop by 10-50x.
 
-**Multi-stage pipelines benefit from the 1-hour SLA.** Synthetic data generation and data processing both run three sequential batches. With a 24-hour SLA, that's three days minimum. With Doubleword's 1-hour SLA, the same pipelines complete in 3 hours. This changes iteration speed: you can refine prompts and re-run the full pipeline multiple times in a single day.
+**Multi-stage pipelines benefit from fast batch turnaround.** Synthetic data generation and data processing both run three sequential batches. On the 24-hour turnaround typical of batch APIs, that's three days minimum. On Doubleword's batch tier the turnaround is far quicker — these pipelines ran end-to-end in a few hours. This changes iteration speed: you can refine prompts and re-run the full pipeline multiple times in a single day.
 
-**Agentic workflows compound the SLA advantage.** The async-agents example spawns recursive agent trees that require 20+ batch rounds. At 24 hours per round, that's potentially a month of wall-clock time. At 1 hour per round, it completes in a day.
+**Agentic workflows compound the turnaround advantage.** The async-agents example spawns recursive agent trees that require 20+ batch rounds. At the 24-hour turnaround typical of batch APIs, that's potentially a month of wall-clock time. With Doubleword's faster turnaround, it completes in a day.
 
-**Single-batch workloads are about cost.** Embeddings, model evals, and image summarization process everything in one batch. The 24-hour SLA is fine; what matters is the 70-95% cost reduction versus real-time APIs. At these prices, you can embed your entire corpus, evaluate every model on every benchmark, and caption your whole image library.
+**Single-batch workloads are about cost.** Embeddings, model evals, and image summarization process everything in one batch. Turnaround time barely matters; what matters is the 70-95% cost reduction versus real-time APIs. At these prices, you can embed your entire corpus, evaluate every model on every benchmark, and caption your whole image library.
 
 ## Cost Comparison
 

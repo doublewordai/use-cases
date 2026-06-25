@@ -1,20 +1,20 @@
 # Async Agents: Deep Research in a Day for \$0.34
 
-Agentic workflows require many rounds of inference. A single research agent might call tools 10-20 times before producing a final report; a tree of agents can easily require hundreds of LLM calls. At real-time API rates, this gets expensive fast. At batch rates with a 24-hour SLA, it's cheap but slow: each batch round adds latency, and a deep agent tree might take weeks to complete.
+Agentic workflows require many rounds of inference. A single research agent might call tools 10-20 times before producing a final report; a tree of agents can easily require hundreds of LLM calls. At real-time API rates, this gets expensive fast. At batch rates on the 24-hour turnaround typical of batch APIs, it's cheap but slow: each batch round adds latency, and a deep agent tree might take weeks to complete.
 
-Doubleword is the only platform that offers a 1-hour SLA for batch inference. This changes what's possible: a recursive research system that spawns dozens of sub-agents, each making multiple tool calls, can complete in a day rather than a month, while still costing 95% less than real-time inference.
+Doubleword turns batch inference around far faster than the standard 24-hour batch window. This changes what's possible: a recursive research system that spawns dozens of sub-agents, each making multiple tool calls, can complete in a day rather than a month, while still costing 95% less than real-time inference.
 
 To run this yourself, install the [dw CLI](https://github.com/doublewordai/dw) and `dw login`, or sign up at [app.doubleword.ai](https://app.doubleword.ai).
 
 ## Why This Matters
 
-Consider a research query like "how has the popularity of daffodils evolved over recent centuries?" A system that spawns sub-agents to explore different angles (cultural history, agricultural data, literary references, regional variations) might require 20+ batch rounds with 30-60 agents total. With a 24-hour SLA, that's potentially a month of wall-clock time. With Doubleword's 1-hour SLA, the same research completes in a day.
+Consider a research query like "how has the popularity of daffodils evolved over recent centuries?" A system that spawns sub-agents to explore different angles (cultural history, agricultural data, literary references, regional variations) might require 20+ batch rounds with 30-60 agents total. On the 24-hour turnaround typical of batch APIs, that's potentially a month of wall-clock time. With Doubleword's faster turnaround, the same research completes in a day.
 
 The cost difference is equally dramatic. Here's what that daffodils query actually cost using the Qwen 235B model (1,950,090 input tokens, 93,031 output tokens):
 
 | Provider | Model | ELO | Input Rate | Output Rate | Total Cost |
 |----------|-------|-----|------------|-------------|------------|
-| Doubleword (1hr SLA) | Qwen 235B | 1423 | \$0.15/MTok | \$0.55/MTok | **\$0.34** |
+| Doubleword (batch) | Qwen 235B | 1423 | \$0.15/MTok | \$0.55/MTok | **\$0.34** |
 | OpenAI | GPT-4o | 1442 | \$2.50/MTok | \$10.00/MTok | **\$5.81** |
 | Anthropic | Claude Sonnet 4.5 | 1450 | \$3.00/MTok | \$15.00/MTok | **\$7.25** |
 
@@ -180,7 +180,7 @@ dw usage --since $(date +%Y-%m-%d)
 
 Here's what actual research runs cost with the 235B model:
 
-| Query | Agents | Rounds | Input Tokens | Output Tokens | Doubleword (1hr) | OpenAI GPT-4o | Claude Sonnet 4.5 |
+| Query | Agents | Rounds | Input Tokens | Output Tokens | Doubleword (batch) | OpenAI GPT-4o | Claude Sonnet 4.5 |
 |-------|--------|--------|--------------|---------------|------------------|---------------|-------------------|
 | Daffodil popularity history | 47 | 25 | 1.95M | 93K | **\$0.34** | \$5.81 | \$7.25 |
 | Effects of modern lifestyle on health | 66 | 21 | 3.0M | 113K | **\$0.51** | \$8.63 | \$10.70 |

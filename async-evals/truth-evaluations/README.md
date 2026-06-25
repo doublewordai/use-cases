@@ -146,11 +146,6 @@ dw batches analytics --from-file .judge-id
 Open [http://localhost:6006](http://localhost:6006) → **Datasets → truthfulqa-eval
 → Experiments** to browse per-example answers and scores.
 
-> **On the completion window:** `BATCH_COMPLETION_WINDOW` sets a *maximum* ceiling, not an
-> expected wait. Batches routinely finish much sooner; the long ceiling just lets
-> the shared queue absorb a worst case across tenants. Use `1h` for a faster
-> smoke test.
-
 ### 5. Or run it all in one script
 
 If you'd rather not orchestrate the CLI, [`eval.py`](eval.py) does the whole loop

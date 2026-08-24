@@ -1,0 +1,31 @@
+[project]
+name = "doubleword-agent-migration-kit"
+setup = "uv sync"
+workflow = [
+    "dw project setup",
+    "dw project run prepare",
+    "dw project run baseline -- --model gpt-5.6-sol",
+    "dw project run score -- -r results/incumbent.jsonl -l 'GPT-5.6 Sol (incumbent)'",
+    "dw files prepare batches/batch.jsonl --model moonshotai/kimi-k3 --output-file batches/kimi.jsonl",
+    "dw batches run batches/kimi.jsonl --watch --output-id .kimi-id",
+    "dw batches results --from-file .kimi-id -o results/kimi.jsonl",
+    "dw batches analytics --from-file .kimi-id",
+    "dw project run score -- -r results/kimi.jsonl -l 'Kimi K3'",
+    "dw project run shadow",
+]
+
+[steps.generate]
+description = "Regenerate the synthetic golden dataset (ships frozen in data/)"
+run = "uv run agent-migration generate"
+
+[steps.prepare]
+description = "Build the model-agnostic batch file from the golden dataset"
+run = "uv run agent-migration prepare"
+
+[steps.score]
+description = "Score a results file against the golden labels"
+run = "uv run agent-migration score"
+
+[steps.shadow]
+description = "Shadow the candidate against the incumbent on a few live tickets"
+run = "uv run agent-migration shadow"

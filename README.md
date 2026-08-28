@@ -25,6 +25,7 @@ Or sign up at [app.doubleword.ai](https://app.doubleword.ai) if you don't have a
 | [dataset-compilation](./dataset-compilation/) | Build company datasets via search + LLM | \$1.05 for 188 companies | 100% recall vs Gartner Magic Quadrant |
 | [structured-extraction](./structured-extraction/) | Extract fields from scanned receipts | \$0.12 for 626 receipts | Qwen3-30B beats GPT-5.2 at 1/12th cost |
 | [image-summarization](./image-summarization/) | Caption images for social media | \$0.10 for 1,000 images | Vision batch makes captioning automatic |
+| [agent-migration](./agent-migration/) | Migrate an agent from a closed to an open-weight model | \$0.21 for 150 tickets on Kimi K3 | Open model matches GPT-5.6 Sol at less than half the cost |
 
 ## Why These Examples Matter
 
